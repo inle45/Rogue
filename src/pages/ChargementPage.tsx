@@ -38,7 +38,7 @@ export function ChargementPage() {
           </div>
           {progression === 0 && (
             <p className="text-center text-white/20 text-[10px]">
-              Premiers 151 Pokémon · Cache local activé
+              386 Pokémon Gen 1-3 · Cache local activé
             </p>
           )}
         </div>

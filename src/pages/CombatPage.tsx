@@ -143,7 +143,7 @@ export function CombatPage() {
   const {
     terrain, cachePokemons, etage, appliquerResultatCombat,
     meteoActuelle, reliques, reliquesProposees, choisirRelique,
-    combatDifficile,
+    combatDifficile, classeDresseur, enregistrerDegatsRun,
   } = useJeuStore();
   const [phase, setPhase] = useState<'preparation' | 'combat' | 'resultat'>('preparation');
   const [tours, setTours] = useState<TourCombat[]>([]);
@@ -243,7 +243,7 @@ export function CombatPage() {
 
   const lancerAnimation = () => {
     if (!equipeEnnemi.length) return;
-    const res = resoudreCombat(equipeJoueur, equipeEnnemi, meteoActuelle, reliques, estBoss);
+    const res = resoudreCombat(equipeJoueur, equipeEnnemi, meteoActuelle, reliques, estBoss, classeDresseur);
     setTours(res.tours);
     setEquipeFinalJoueur(res.equipeFinalJoueur);
     setVictoire(res.victoire);
@@ -271,6 +271,20 @@ export function CombatPage() {
 
   const terminer = () => {
     setAfficherVictoire(false);
+    // Calcule les dégâts infligés par le joueur : PV perdus par les ennemis
+    if (victoire) {
+      const degatsInfliges = equipeEnnemi.reduce((total, ennemi) => {
+        const pvInitiaux = ennemi.stats.pv;
+        const pvFinaux = equipeFinalJoueur.length > 0
+          ? (tours.reduce((pv, t) => {
+              if (t.instanceIdDefenseur === ennemi.instanceId) return t.pvRestantsDefenseur;
+              return pv;
+            }, ennemi.pvActuels))
+          : ennemi.pvActuels;
+        return total + Math.max(0, pvInitiaux - pvFinaux);
+      }, 0);
+      enregistrerDegatsRun(degatsInfliges);
+    }
     appliquerResultatCombat(victoire ? 0 : 10 + etage * 2, victoire);
   };
 

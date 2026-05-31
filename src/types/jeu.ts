@@ -3,7 +3,7 @@
 import type { TypeMeteo } from '../data/meteo';
 
 // 'victoire' supprimée : après un combat gagné on revient directement en 'draft'
-export type PhaseJeu = 'chargement' | 'draft' | 'combat' | 'defaite';
+export type PhaseJeu = 'chargement' | 'draft' | 'combat' | 'defaite' | 'choix_classe' | 'victoire_finale' | 'transition';
 
 export interface EtatJeu {
   phase: PhaseJeu;

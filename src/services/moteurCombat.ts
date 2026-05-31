@@ -169,6 +169,7 @@ export function resoudreCombat(
   meteo: TypeMeteo = 'neutre',
   reliques: DefinitionRelique[] = [],
   estBoss = false,
+  classeDresseur: string | null = null,
 ): ResultatCombat {
   let joueurs = appliquerBonusSynergies(equipeJoueur.map(p => ({ ...p })));
   let ennemis = appliquerBonusSynergies(equipeEnnemi.map(p => ({ ...p })));
@@ -181,6 +182,20 @@ export function resoudreCombat(
   // Buffs de positionnement (après synergies et reliques)
   joueurs = appliquerBuffsPosition(joueurs);
   ennemis = appliquerBuffsPosition(ennemis);
+
+  // Buff Tacticien : +30% toutes stats
+  if (classeDresseur === 'tacticien') {
+    joueurs = joueurs.map(p => ({
+      ...p,
+      stats: {
+        pv: Math.floor(p.stats.pv * 1.3),
+        attaque: Math.floor(p.stats.attaque * 1.3),
+        defense: Math.floor(p.stats.defense * 1.3),
+        vitesse: Math.floor(p.stats.vitesse * 1.3),
+      },
+      pvActuels: Math.floor(p.pvActuels * 1.3),
+    }));
+  }
 
   const tours: TourCombat[] = [];
   const meteoData = METEOS[meteo];

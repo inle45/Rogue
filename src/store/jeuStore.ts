@@ -105,6 +105,7 @@ function tirerBoutique(cache: PokemonCache[], exclude: string[] = [], etage?: nu
 
 interface ActionsJeu {
   initialiserCache: (cache: PokemonCache[]) => void;
+  demarrerAvecClasse: (classe: 'classique' | 'riche' | 'tacticien') => void;
   acheterPokemon: (boutiquePokemon: PokemonBoutique) => void;
   vendrePokemon: (instanceId: string) => void;
   refreshBoutique: () => void;
@@ -121,6 +122,7 @@ interface ActionsJeu {
   utiliserCentreRepas: () => void;
   choisirEvenement: (type: 'difficile' | 'normal') => void;
   evoluerPokemon: (instanceId: string) => void;
+  enregistrerDegatsRun: (degats: number) => void;
 }
 
 interface StoreJeu extends EtatJeu, ActionsJeu {
@@ -134,6 +136,11 @@ interface StoreJeu extends EtatJeu, ActionsJeu {
   reliques: DefinitionRelique[];
   reliquesProposees: DefinitionRelique[];
   combatDifficile: boolean;
+  classeDresseur: 'classique' | 'riche' | 'tacticien' | null;
+  terrainMax: number;
+  statsRun: { degatsInfliges: number; combatsGagnes: number; pokemonUtilisesNoms: string[] };
+  etageTransition: number;
+  typeEtageTransition: TypeEtage | null;
 }
 
 export const useJeuStore = create<StoreJeu>((set, get) => ({
@@ -157,21 +164,37 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
   reliques: [],
   reliquesProposees: [],
   combatDifficile: false,
+  classeDresseur: null as 'classique' | 'riche' | 'tacticien' | null,
+  terrainMax: 3,
+  statsRun: {
+    degatsInfliges: 0,
+    combatsGagnes: 0,
+    pokemonUtilisesNoms: [] as string[],
+  },
+  etageTransition: 0,
+  typeEtageTransition: null as TypeEtage | null,
 
   initialiserCache: (cache) => {
     const etage = 1;
     const boutique = tirerBoutique(cache, [], etage);
     const carteEtages = genererCarteEtages();
     const boutiqueItems = genererItemsAleatoires(NB_ITEMS_BOUTIQUE);
-    set({ cachePokemons: cache, boutique, phase: 'draft', carteEtages, boutiqueItems });
+    set({ cachePokemons: cache, boutique, phase: 'choix_classe', carteEtages, boutiqueItems });
+  },
+
+  demarrerAvecClasse: (classe) => {
+    const pokedollars = classe === 'riche' ? 30 : 10;
+    const terrainMax = classe === 'tacticien' ? 2 : 3;
+    set({ classeDresseur: classe, pokedollars, terrainMax, phase: 'draft' });
   },
 
   acheterPokemon: (boutiquePokemon) => {
-    const { pokedollars, banc, terrain, boutique, cachePokemons: _cachePokemons } = get();
-    if (pokedollars < boutiquePokemon.prix || boutiquePokemon.achete) return;
+    const { pokedollars, banc, terrain, boutique, cachePokemons: _cachePokemons, classeDresseur, terrainMax } = get();
+    const prixEffectif = boutiquePokemon.prix + (classeDresseur === 'riche' ? 1 : 0);
+    if (pokedollars < prixEffectif || boutiquePokemon.achete) return;
 
-    // Cherche un slot libre : d'abord terrain, puis banc
-    const slotTerrain = terrain.findIndex(s => s === null);
+    // Cherche un slot libre : d'abord terrain (sauf si terrainMax atteint), puis banc
+    const slotTerrain = terrain.findIndex((s, i) => s === null && i < terrainMax);
     const slotBanc = banc.findIndex(s => s === null);
 
     if (slotTerrain === -1 && slotBanc === -1) return; // Équipe pleine
@@ -194,7 +217,7 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
     const synergiesActives = calculerSynergies(nouveauTerrain);
 
     set({
-      pokedollars: pokedollars - boutiquePokemon.prix,
+      pokedollars: pokedollars - prixEffectif,
       terrain: nouveauTerrain,
       banc: nouveauBanc,
       boutique: nouvelleBoutique,
@@ -277,7 +300,7 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
   },
 
   appliquerResultatCombat: (degatsJoueur, victoire) => {
-    const { pvJoueur, pvJoueurMax, terrain, banc, etage, pokedollars, cachePokemons, reliques, combatDifficile } = get();
+    const { pvJoueur, pvJoueurMax, terrain, banc, etage, pokedollars, cachePokemons, reliques, combatDifficile, statsRun, carteEtages } = get();
     let nouveauxPv = Math.max(0, pvJoueur - degatsJoueur);
 
     if (nouveauxPv <= 0) {
@@ -316,7 +339,6 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
 
     const nouvelEtage = etage + 1;
     sauvegarderMeilleurEtage(nouvelEtage);
-    const { carteEtages } = get();
     const typeProchainEtage = carteEtages[nouvelEtage - 1] as TypeEtage | undefined;
     const nbItems = typeProchainEtage === 'boutique_bonus' ? 4 : NB_ITEMS_BOUTIQUE;
 
@@ -326,9 +348,37 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
       ? tirerReliquesAleatoires(3, reliques.map(r => r.id))
       : [];
 
+    // Mise à jour statsRun
+    const nomsPokemon = terrain.filter(Boolean).map(p => p!.nomFr);
+    const nouvellesNoms = Array.from(new Set([...statsRun.pokemonUtilisesNoms, ...nomsPokemon]));
+    const nouveauxStatsRun = {
+      ...statsRun,
+      combatsGagnes: statsRun.combatsGagnes + 1,
+      pokemonUtilisesNoms: nouvellesNoms,
+    };
+
+    // Victoire finale (étage 16+)
+    if (nouvelEtage > NB_ETAGES_TOTAL) {
+      set({
+        pvJoueur: nouveauxPv,
+        phase: 'victoire_finale',
+        terrain: terrain.map(soigner) as typeof terrain,
+        banc: banc.map(soigner) as typeof banc,
+        etage: nouvelEtage,
+        meilleurEtage: Math.max(chargerMeilleurEtage(), nouvelEtage),
+        pokedollars: pokedollars + recompense,
+        statsRun: nouveauxStatsRun,
+        combatDifficile: false,
+      });
+      return;
+    }
+
+    // Transition animée avant le draft
     set({
       pvJoueur: nouveauxPv,
-      phase: 'draft',
+      phase: 'transition',
+      etageTransition: nouvelEtage,
+      typeEtageTransition: typeProchainEtage ?? 'combat',
       terrain: terrain.map(soigner) as typeof terrain,
       banc: banc.map(soigner) as typeof banc,
       etage: nouvelEtage,
@@ -339,7 +389,12 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
       coutRefresh: COUT_REFRESH_BASE,
       reliquesProposees,
       combatDifficile: false,
+      statsRun: nouveauxStatsRun,
     });
+
+    setTimeout(() => {
+      set({ phase: 'draft' });
+    }, 1800);
   },
 
   passerEtage: () => {
@@ -361,7 +416,7 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
   },
 
   fuir: () => {
-    const { pvJoueur, etage, pokedollars, cachePokemons } = get();
+    const { pvJoueur, etage, pokedollars, cachePokemons, carteEtages } = get();
     const coutFuite = 20;
     const nouveauxPv = Math.max(0, pvJoueur - coutFuite);
     if (nouveauxPv <= 0) {
@@ -371,6 +426,7 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
     const nouvelEtage = etage + 1;
     const boutique = tirerBoutique(cachePokemons, [], nouvelEtage);
     const boutiqueItems = genererItemsAleatoires(NB_ITEMS_BOUTIQUE);
+    const typeProchainEtage = carteEtages[nouvelEtage - 1] as TypeEtage | undefined;
     set({
       pvJoueur: nouveauxPv,
       etage: nouvelEtage,
@@ -378,8 +434,13 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
       boutique,
       boutiqueItems,
       coutRefresh: COUT_REFRESH_BASE,
-      phase: 'draft',
+      phase: 'transition',
+      etageTransition: nouvelEtage,
+      typeEtageTransition: typeProchainEtage ?? 'combat',
     });
+    setTimeout(() => {
+      set({ phase: 'draft' });
+    }, 1800);
   },
 
   acheterItem: (item: ItemJeu) => {
@@ -481,5 +542,10 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
     const nouveauBanc = remplacer(banc) as typeof banc;
     const synergiesActives = calculerSynergies(nouveauTerrain);
     set({ terrain: nouveauTerrain, banc: nouveauBanc, synergiesActives });
+  },
+
+  enregistrerDegatsRun: (degats: number) => {
+    const { statsRun } = get();
+    set({ statsRun: { ...statsRun, degatsInfliges: statsRun.degatsInfliges + degats } });
   },
 }));

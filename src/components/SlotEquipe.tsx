@@ -15,6 +15,21 @@ export function SlotEquipe({ pokemon, index, type }: Props) {
   const [survolCarte, setSurvolCarte] = useState(false);
   const echangerSlots = useJeuStore(s => s.echangerSlots);
   const vendrePokemon = useJeuStore(s => s.vendrePokemon);
+  const terrainMax = useJeuStore(s => s.terrainMax);
+
+  const estVerrouille = type === 'terrain' && index >= terrainMax;
+
+  if (estVerrouille) {
+    return (
+      <div className="relative rounded-2xl min-h-[140px] flex items-center justify-center border border-dashed border-red-900/40 bg-red-950/10 opacity-50">
+        <div className="flex flex-col items-center gap-1 text-red-700">
+          <span className="text-2xl">🔒</span>
+          <span className="text-[9px] font-bold">Slot verrouillé</span>
+          <span className="text-[8px] text-red-900">Tacticien</span>
+        </div>
+      </div>
+    );
+  }
 
   const onDragStart = (e: React.DragEvent) => {
     if (!pokemon) return;
