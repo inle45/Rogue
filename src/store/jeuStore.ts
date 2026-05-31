@@ -177,7 +177,7 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
   },
 
   appliquerResultatCombat: (degatsJoueur, victoire) => {
-    const { pvJoueur, terrain, banc } = get();
+    const { pvJoueur, terrain, banc, etage, pokedollars, cachePokemons } = get();
     const nouveauxPv = Math.max(0, pvJoueur - degatsJoueur);
 
     if (nouveauxPv <= 0) {
@@ -185,18 +185,28 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
       return;
     }
 
-    // Correction : soin de 30% des PV max après chaque victoire
+    if (!victoire) {
+      set({ pvJoueur: nouveauxPv, phase: 'defaite' });
+      return;
+    }
+
+    // Victoire : soin de 30% des PV max + passage à l'étage suivant
     const soigner = (p: PokemonEquipe | null): PokemonEquipe | null => {
       if (!p) return null;
       const pvMax = p.stats.pv + p.bonusPv;
       return { ...p, pvActuels: Math.min(pvMax, p.pvActuels + Math.floor(pvMax * 0.3)) };
     };
 
+    const recompense = 5 + etage;
     set({
       pvJoueur: nouveauxPv,
-      phase: victoire ? 'draft' : 'defaite',
-      terrain: victoire ? (terrain.map(soigner) as typeof terrain) : terrain,
-      banc: victoire ? (banc.map(soigner) as typeof banc) : banc,
+      phase: 'draft',
+      terrain: terrain.map(soigner) as typeof terrain,
+      banc: banc.map(soigner) as typeof banc,
+      etage: etage + 1,
+      pokedollars: pokedollars + recompense,
+      boutique: tirerBoutique(cachePokemons),
+      coutRefresh: COUT_REFRESH_BASE,
     });
   },
 
