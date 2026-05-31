@@ -49,6 +49,7 @@ interface ActionsJeu {
   lancerCombat: () => void;
   appliquerResultatCombat: (degatsJoueur: number, victoire: boolean) => void;
   passerEtage: () => void;
+  fuir: () => void; // Fuit le combat contre 20 PV, passe à l'étage suivant
 }
 
 interface StoreJeu extends EtatJeu, ActionsJeu {
@@ -115,7 +116,8 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
     const { pokedollars, coutRefresh, cachePokemons } = get();
     if (pokedollars < coutRefresh) return;
     const boutique = tirerBoutique(cachePokemons);
-    set({ boutique, pokedollars: pokedollars - coutRefresh });
+    // Le coût augmente de 1 à chaque refresh
+    set({ boutique, pokedollars: pokedollars - coutRefresh, coutRefresh: coutRefresh + 1 });
   },
 
   deplacerVersTerrain: (instanceId, slotTerrain) => {
@@ -183,15 +185,18 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
       return;
     }
 
-    // Soigne partiellement l'équipe après combat
-    const soigner = (p: PokemonEquipe | null) =>
-      p ? { ...p, pvActuels: Math.min(p.stats.pv + p.bonusPv, Math.floor((p.stats.pv + p.bonusPv) * 0.7) + p.pvActuels) } : null;
+    // Correction : soin de 30% des PV max après chaque victoire
+    const soigner = (p: PokemonEquipe | null): PokemonEquipe | null => {
+      if (!p) return null;
+      const pvMax = p.stats.pv + p.bonusPv;
+      return { ...p, pvActuels: Math.min(pvMax, p.pvActuels + Math.floor(pvMax * 0.3)) };
+    };
 
     set({
       pvJoueur: nouveauxPv,
       phase: victoire ? 'draft' : 'defaite',
-      terrain: victoire ? terrain.map(soigner) as typeof terrain : terrain,
-      banc: victoire ? banc.map(soigner) as typeof banc : banc,
+      terrain: victoire ? (terrain.map(soigner) as typeof terrain) : terrain,
+      banc: victoire ? (banc.map(soigner) as typeof banc) : banc,
     });
   },
 
@@ -203,6 +208,26 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
       etage: etage + 1,
       pokedollars: pokedollars + recompense,
       boutique,
+      coutRefresh: COUT_REFRESH_BASE, // Réinitialise le coût de refresh à chaque étage
+      phase: 'draft',
+    });
+  },
+
+  fuir: () => {
+    const { pvJoueur, etage, pokedollars, cachePokemons } = get();
+    const coutFuite = 20;
+    const nouveauxPv = Math.max(0, pvJoueur - coutFuite);
+    if (nouveauxPv <= 0) {
+      set({ pvJoueur: 0, phase: 'defaite' });
+      return;
+    }
+    const boutique = tirerBoutique(cachePokemons);
+    set({
+      pvJoueur: nouveauxPv,
+      etage: etage + 1,
+      pokedollars: pokedollars + 2, // Petite récompense symbolique
+      boutique,
+      coutRefresh: COUT_REFRESH_BASE,
       phase: 'draft',
     });
   },

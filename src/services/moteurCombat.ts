@@ -28,8 +28,9 @@ function calculerDegats(
   defenseur: PokemonEquipe
 ): { degats: number; multiplicateur: number } {
   const bonusAtk = 1 + attaquant.bonusAttaque / 100;
-  const bonusDef = 1 + defenseur.bonusDefense / 100;
-  const base = Math.max(1, Math.floor((attaquant.stats.attaque * bonusAtk) / (defenseur.stats.defense * bonusDef) * 15));
+  // Correction bug division par zéro : défense minimale de 1
+  const defenseEffective = Math.max(1, defenseur.stats.defense * (1 + defenseur.bonusDefense / 100));
+  const base = Math.max(1, Math.floor((attaquant.stats.attaque * bonusAtk) / defenseEffective * 15));
   const multiplicateur = getMultiplicateur(attaquant.types[0], defenseur.types);
   return { degats: Math.max(1, Math.floor(base * multiplicateur)), multiplicateur };
 }
@@ -38,8 +39,9 @@ export function resoudreCombat(
   equipeJoueur: PokemonEquipe[],
   equipeEnnemi: PokemonEquipe[]
 ): ResultatCombat {
+  // Correction : les deux équipes bénéficient de leurs synergies de types
   const joueurs = appliquerBonusSynergies(equipeJoueur.map(p => ({ ...p })));
-  const ennemis = equipeEnnemi.map(p => ({ ...p }));
+  const ennemis = appliquerBonusSynergies(equipeEnnemi.map(p => ({ ...p })));
   const tours: TourCombat[] = [];
   let tourMax = 60;
 
@@ -72,6 +74,7 @@ export function resoudreCombat(
       tours.push({
         attaquant: pokemon.nomFr,
         defenseur: cible.nomFr,
+        instanceIdDefenseur: cible.instanceId,
         degats,
         multiplicateur,
         pvRestantsDefenseur: cible.pvActuels,

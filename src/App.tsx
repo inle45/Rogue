@@ -18,7 +18,6 @@ export default function App() {
   switch (phase) {
     case 'chargement': return <ChargementPage />;
     case 'draft':      return <DraftPage />;
-    case 'victoire':   return <DraftPage />;
     case 'combat':     return <CombatPage />;
     case 'defaite':    return <GameOverPage etage={etage} onRecommencer={recommencer} />;
     default:           return <ChargementPage />;

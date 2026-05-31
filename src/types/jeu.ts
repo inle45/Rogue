@@ -1,6 +1,7 @@
 // Types de l'état global du jeu
 
-export type PhaseJeu = 'chargement' | 'draft' | 'combat' | 'victoire' | 'defaite';
+// 'victoire' supprimée : après un combat gagné on revient directement en 'draft'
+export type PhaseJeu = 'chargement' | 'draft' | 'combat' | 'defaite';
 
 export interface EtatJeu {
   phase: PhaseJeu;
@@ -33,6 +34,7 @@ export interface ResultatCombat {
 export interface TourCombat {
   attaquant: string;
   defenseur: string;
+  instanceIdDefenseur: string; // pour tracker les PV sans collision sur les doublons de nom
   degats: number;
   multiplicateur: number;
   pvRestantsDefenseur: number;

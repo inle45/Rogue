@@ -31,9 +31,11 @@ export function CombatPage() {
 
   const equipeJoueur = terrain.filter(Boolean) as PokemonEquipe[];
 
+  // Génère l'équipe ennemie une seule fois au montage du composant
+  // cachePokemons et etage ne changent pas pendant un combat — la dépendance vide est intentionnelle
   useEffect(() => {
     if (cachePokemons.length > 0) setEquipeEnnemi(genererEquipeEnnemi(cachePokemons, etage));
-  }, []);
+  }, [cachePokemons, etage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (journalRef.current) journalRef.current.scrollTop = journalRef.current.scrollHeight;
@@ -61,18 +63,18 @@ export function CombatPage() {
   const equipeJoueurEnCours = phase === 'resultat' ? equipeFinalJoueur : equipeJoueur;
   const toursVisibles = tours.slice(0, tourAffiche);
 
-  // Calcule PV en cours à partir du journal
+  // Correction : tracking par instanceId pour éviter les collisions sur les doublons de nom
   const pvEnCours: Record<string, number> = {};
-  [...equipeJoueur, ...equipeEnnemi].forEach(p => { pvEnCours[p.nomFr] = p.pvActuels; });
-  toursVisibles.forEach(t => { pvEnCours[t.defenseur] = t.pvRestantsDefenseur; });
+  [...equipeJoueur, ...equipeEnnemi].forEach(p => { pvEnCours[p.instanceId] = p.pvActuels; });
+  toursVisibles.forEach(t => { pvEnCours[t.instanceIdDefenseur] = t.pvRestantsDefenseur; });
 
   const joueurAvecPvEnCours = equipeJoueurEnCours.map(p => ({
     ...p,
-    pvActuels: pvEnCours[p.nomFr] ?? p.pvActuels,
+    pvActuels: pvEnCours[p.instanceId] ?? p.pvActuels,
   }));
   const ennemiAvecPvEnCours = equipeEnnemi.map(p => ({
     ...p,
-    pvActuels: pvEnCours[p.nomFr] ?? p.pvActuels,
+    pvActuels: pvEnCours[p.instanceId] ?? p.pvActuels,
   }));
 
   return (

@@ -3,15 +3,21 @@ import { useJeuStore } from '../store/jeuStore';
 import { CartePokemon } from '../components/CartePokemon';
 import { SlotEquipe } from '../components/SlotEquipe';
 import { PanneauSynergies } from '../components/PanneauSynergies';
+import type { PokemonEquipe } from '../types/pokemon';
 
 type Onglet = 'boutique' | 'equipe' | 'combat';
+
+// Compte les Pokémon d'un type donné déjà présents dans l'équipe (terrain + banc)
+function compterTypeEquipe(equipe: (PokemonEquipe | null)[], type: string): number {
+  return equipe.filter(p => p?.types.includes(type)).length;
+}
 
 export function DraftPage() {
   const [onglet, setOnglet] = useState<Onglet>('boutique');
   const {
     pokedollars, pvJoueur, pvJoueurMax, etage,
     terrain, banc, boutique, coutRefresh,
-    acheterPokemon, refreshBoutique, lancerCombat,
+    acheterPokemon, refreshBoutique, lancerCombat, fuir,
   } = useJeuStore();
 
   const nbTerrain = terrain.filter(Boolean).length;
@@ -82,28 +88,46 @@ export function DraftPage() {
             </div>
 
             <div className="grid grid-cols-3 gap-3">
-              {boutique.map((p, i) => (
-                <div key={`${p.id}_${i}`} className="relative flex flex-col gap-1.5">
-                  <CartePokemon pokemon={p} afficherStats />
-                  {p.achete ? (
-                    <div className="absolute inset-0 rounded-2xl bg-gray-950/75 flex items-center justify-center">
-                      <span className="text-green-400 font-black text-sm">✓</span>
+              {boutique.map((p, i) => {
+                // Indicateur de synergie : combien de ce type dans l'équipe
+                const touteEquipe = [...terrain, ...banc];
+                const comptesTypes = p.types.map(t => ({
+                  type: t,
+                  count: compterTypeEquipe(touteEquipe, t),
+                }));
+                return (
+                  <div key={`${p.id}_${i}`} className="relative flex flex-col gap-1.5">
+                    <CartePokemon pokemon={p} afficherStats />
+
+                    {/* Indicateurs de types dans l'équipe */}
+                    <div className="flex gap-1 justify-center">
+                      {comptesTypes.map(({ type, count }) => count > 0 && (
+                        <span key={type} className="text-[10px] text-cyan-400 font-bold bg-cyan-950/50 border border-cyan-800/50 rounded-lg px-1.5 py-0.5">
+                          {count}× {type}
+                        </span>
+                      ))}
                     </div>
-                  ) : (
-                    <button
-                      onClick={() => acheterPokemon(p)}
-                      disabled={pokedollars < p.prix || nbTotal >= 6}
-                      className="w-full py-2 rounded-xl text-xs font-black tracking-wider transition-all
-                        bg-gradient-to-r from-yellow-600 to-amber-500
-                        hover:from-yellow-500 hover:to-amber-400
-                        disabled:from-gray-700 disabled:to-gray-800 disabled:text-white/30
-                        shadow-lg shadow-yellow-900/30"
-                    >
-                      ₽{p.prix} — ACHETER
-                    </button>
-                  )}
-                </div>
-              ))}
+
+                    {p.achete ? (
+                      <div className="absolute inset-0 rounded-2xl bg-gray-950/75 flex items-center justify-center">
+                        <span className="text-green-400 font-black text-sm">✓</span>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => acheterPokemon(p)}
+                        disabled={pokedollars < p.prix || nbTotal >= 6}
+                        className="w-full py-2 rounded-xl text-xs font-black tracking-wider transition-all
+                          bg-gradient-to-r from-yellow-600 to-amber-500
+                          hover:from-yellow-500 hover:to-amber-400
+                          disabled:from-gray-700 disabled:to-gray-800 disabled:text-white/30
+                          shadow-lg shadow-yellow-900/30"
+                      >
+                        ₽{p.prix} — ACHETER
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             {nbTotal >= 6 && (
@@ -177,6 +201,16 @@ export function DraftPage() {
                   : 'bg-gray-800 text-white/30 cursor-not-allowed'}`}
             >
               ⚔️ COMBATTRE
+            </button>
+
+            {/* Bouton Fuir */}
+            <button
+              onClick={fuir}
+              className="w-full py-3 rounded-2xl font-bold text-sm tracking-wider transition-all
+                border border-orange-800/40 bg-orange-950/20 text-orange-400
+                hover:bg-orange-900/30 active:scale-95"
+            >
+              🏃 FUIR (−20 PV, passer l'étage)
             </button>
           </div>
         )}
