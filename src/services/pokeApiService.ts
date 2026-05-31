@@ -54,34 +54,56 @@ interface PokeApiResponse {
   sprites: { front_default: string; other?: { 'official-artwork'?: { front_default: string } } };
 }
 
-function extraireStats(data: PokeApiResponse): StatsPokemon {
+function extraireStats(data: PokeApiResponse): { stats: StatsPokemon; bst: number } {
   const get = (nom: string) => data.stats.find(s => s.stat.name === nom)?.base_stat ?? 50;
+  // Formule officielle Pokémon niveau 50
+  const basePv = get('hp');
+  const baseAtk = get('attack');
+  const baseDef = get('defense');
+  const baseSpa = get('special-attack');
+  const baseSpd = get('special-defense');
+  const baseVit = get('speed');
+  const bst = basePv + baseAtk + baseDef + baseSpa + baseSpd + baseVit;
   return {
-    pv: get('hp'),
-    attaque: get('attack'),
-    defense: get('defense'),
-    vitesse: get('speed'),
+    stats: {
+      pv: basePv + 60,
+      attaque: baseAtk + 5,
+      defense: baseDef + 5,
+      vitesse: baseVit + 5,
+    },
+    bst,
   };
 }
 
 // Variable utilisée pour la traduction des types (référencée mais pas encore utilisée dynamiquement)
 void TYPES_FR;
 
+function calculerRarete(bst: number): 1 | 2 | 3 | 4 {
+  if (bst < 400) return 1;
+  if (bst < 500) return 2;
+  if (bst < 580) return 3;
+  return 4;
+}
+
 async function fetchPokemon(id: number): Promise<PokemonCache> {
   const response = await fetch(`https://pokeapi.co/api/v2/pokemon/${id}`);
   const data: PokeApiResponse = await response.json();
+  const { stats, bst } = extraireStats(data);
+  const rarete = calculerRarete(bst);
 
   return {
     id: data.id,
     nom: data.name,
     nomFr: NOMS_FR[data.id] || data.name,
     types: data.types.map(t => t.type.name),
-    stats: extraireStats(data),
+    stats,
+    bst,
+    rarete,
     sprite: data.sprites.other?.['official-artwork']?.front_default || data.sprites.front_default,
   };
 }
 
-const CLE_CACHE_LOCAL = 'pokedraft_cache_v1';
+const CLE_CACHE_LOCAL = 'pokedraft_cache_v2';
 
 export async function chargerCachePokemons(
   onProgression?: (loaded: number, total: number) => void
@@ -91,7 +113,8 @@ export async function chargerCachePokemons(
     const cached = localStorage.getItem(CLE_CACHE_LOCAL);
     if (cached) {
       const data = JSON.parse(cached) as PokemonCache[];
-      if (data.length === 151) {
+      // Vérifie que le cache est valide et contient les champs rarete/bst
+      if (data.length === 151 && data[0]?.rarete !== undefined) {
         onProgression?.(151, 151);
         return data;
       }

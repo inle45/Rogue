@@ -17,9 +17,22 @@ function appliquerBonusSynergies(equipe: PokemonEquipe[]): PokemonEquipe[] {
         bonusDefense += s.bonusDefense;
       }
     }
+    // L'Épi de Choix ajoute +50% en attaque
+    if (pokemon.item?.id === 'choice-band') bonusAttaque += 50;
     const pvMax = Math.floor(pokemon.stats.pv * (1 + bonusPv / 100));
     return { ...pokemon, bonusAttaque, bonusPv, bonusDefense, pvActuels: Math.min(pokemon.pvActuels, pvMax) };
   });
+}
+
+/** Calcule la vitesse effective d'un Pokémon (Serre Griffe ×1,5) */
+function vitesseEffective(pokemon: PokemonEquipe): number {
+  const mult = pokemon.item?.id === 'quick-claw' ? 1.5 : 1;
+  return pokemon.stats.vitesse * mult;
+}
+
+/** PV max tenant compte des bonus de synergies */
+function pvMax(pokemon: PokemonEquipe): number {
+  return Math.floor(pokemon.stats.pv * (1 + pokemon.bonusPv / 100));
 }
 
 function calculerDegats(
@@ -30,12 +43,21 @@ function calculerDegats(
 ): { degats: number; multiplicateur: number } {
   const bonusAtk = 1 + attaquant.bonusAttaque / 100;
   const defenseEffective = ignorerDefense ? 1 : Math.max(1, defenseur.stats.defense * (1 + defenseur.bonusDefense / 100));
-  const base = Math.max(1, Math.floor((attaquant.stats.attaque * bonusAtk) / defenseEffective * 15));
+  let base = Math.max(1, Math.floor((attaquant.stats.attaque * bonusAtk) / defenseEffective * 20));
+
+  // Pierre de Vie : +30% dégâts
+  if (attaquant.item?.id === 'life-orb') base = Math.floor(base * 1.3);
+
   const multiplicateur = getMultiplicateur(attaquant.types[0], defenseur.types);
-  return {
-    degats: Math.max(1, Math.floor(base * multiplicateur * multiplicateurCapacite)),
-    multiplicateur,
-  };
+
+  let degats = Math.max(1, Math.floor(base * multiplicateur * multiplicateurCapacite));
+
+  // Ceinture Expert : +20% dégâts si super efficace (×2)
+  if (attaquant.item?.id === 'expert-belt' && multiplicateur >= 2) {
+    degats = Math.floor(degats * 1.2);
+  }
+
+  return { degats, multiplicateur };
 }
 
 export function resoudreCombat(
@@ -50,6 +72,10 @@ export function resoudreCombat(
   const compteurAttaques: Record<string, number> = {};
   // Pokémon paralysés sautent leur prochain tour
   const paralysieIds = new Set<string>();
+  // Baies Sitrus consommées (usage unique)
+  const sitrusConso = new Set<string>();
+  // Focus Sash utilisés (usage unique)
+  const sashUtilise = new Set<string>();
 
   let tourMax = 60;
 
@@ -58,10 +84,50 @@ export function resoudreCombat(
     const ennemiVivants = ennemis.filter(p => p.pvActuels > 0);
     if (!joueurVivants.length || !ennemiVivants.length) break;
 
+    // ── Début de tour : effets passifs ──
+    for (const pokemon of [...joueurVivants, ...ennemiVivants]) {
+      const max = pvMax(pokemon);
+
+      // Restes : régénère 6% PV max
+      if (pokemon.item?.id === 'leftovers') {
+        const soin = Math.max(1, Math.floor(max * 0.06));
+        pokemon.pvActuels = Math.min(max, pokemon.pvActuels + soin);
+        tours.push({
+          attaquant: pokemon.nomFr,
+          defenseur: pokemon.nomFr,
+          instanceIdDefenseur: pokemon.instanceId,
+          degats: 0,
+          multiplicateur: 1,
+          pvRestantsDefenseur: pokemon.pvActuels,
+          message: `💚 ${pokemon.nomFr} récupère ${soin} PV grâce aux Restes.`,
+        });
+      }
+
+      // Baie Sitrus : soin unique si PV < 50%
+      if (
+        pokemon.item?.id === 'sitrus-berry' &&
+        !sitrusConso.has(pokemon.instanceId) &&
+        pokemon.pvActuels < max / 2
+      ) {
+        sitrusConso.add(pokemon.instanceId);
+        const soin = Math.max(1, Math.floor(max * 0.3));
+        pokemon.pvActuels = Math.min(max, pokemon.pvActuels + soin);
+        tours.push({
+          attaquant: pokemon.nomFr,
+          defenseur: pokemon.nomFr,
+          instanceIdDefenseur: pokemon.instanceId,
+          degats: 0,
+          multiplicateur: 1,
+          pvRestantsDefenseur: pokemon.pvActuels,
+          message: `🍋 ${pokemon.nomFr} mange sa Baie Sitrus et récupère ${soin} PV !`,
+        });
+      }
+    }
+
     const combattants = [
-      ...joueurVivants.map(p => ({ pokemon: p, equipe: 'joueur' as const })),
-      ...ennemiVivants.map(p => ({ pokemon: p, equipe: 'ennemi' as const })),
-    ].sort((a, b) => b.pokemon.stats.vitesse - a.pokemon.stats.vitesse);
+      ...joueurs.filter(p => p.pvActuels > 0).map(p => ({ pokemon: p, equipe: 'joueur' as const })),
+      ...ennemis.filter(p => p.pvActuels > 0).map(p => ({ pokemon: p, equipe: 'ennemi' as const })),
+    ].sort((a, b) => vitesseEffective(b.pokemon) - vitesseEffective(a.pokemon));
 
     for (const { pokemon, equipe } of combattants) {
       if (pokemon.pvActuels <= 0) continue;
@@ -105,7 +171,18 @@ export function resoudreCombat(
           case 'frappe_puissante': {
             const ignoreDef = capDef.nom === 'Coup Bas';
             const { degats, multiplicateur } = calculerDegats(pokemon, cible, ignoreDef, capDef.valeur);
+            const pvAvant = cible.pvActuels;
             cible.pvActuels = Math.max(0, cible.pvActuels - degats);
+            // Focus Sash : survie à 1PV si KO depuis PV max
+            if (
+              cible.pvActuels <= 0 &&
+              pvAvant >= pvMax(cible) &&
+              cible.item?.id === 'focus-sash' &&
+              !sashUtilise.has(cible.instanceId)
+            ) {
+              sashUtilise.add(cible.instanceId);
+              cible.pvActuels = 1;
+            }
             msg = `✨ ${pokemon.nomFr} utilise ${capDef.nom} ! ${degats} dégâts sur ${cible.nomFr}`;
             tourCapacite = { nom: capDef.nom, description: capDef.description };
             tours.push({
@@ -114,13 +191,41 @@ export function resoudreCombat(
               degats, multiplicateur, pvRestantsDefenseur: cible.pvActuels,
               message: msg, capacite: tourCapacite,
             });
+            // Pierre de Vie : retire 8% PV max après attaque
+            if (pokemon.item?.id === 'life-orb') {
+              const cout = Math.max(1, Math.floor(pvMax(pokemon) * 0.08));
+              pokemon.pvActuels = Math.max(1, pokemon.pvActuels - cout);
+            }
+            // Rocky Helmet : l'attaquant prend 12% pvMax du défenseur en retour
+            if (cible.item?.id === 'rocky-helmet') {
+              const retour = Math.max(1, Math.floor(pvMax(cible) * 0.12));
+              pokemon.pvActuels = Math.max(0, pokemon.pvActuels - retour);
+              tours.push({
+                attaquant: cible.nomFr, defenseur: pokemon.nomFr,
+                instanceIdDefenseur: pokemon.instanceId,
+                degats: retour, multiplicateur: 1,
+                pvRestantsDefenseur: pokemon.pvActuels,
+                message: `🪨 Les Restes de Rocher de ${cible.nomFr} blessent ${pokemon.nomFr} de ${retour} PV !`,
+              });
+            }
             break;
           }
           case 'degats_aoe': {
             const degatsParCible = Math.max(1, Math.floor(pokemon.stats.attaque * (1 + pokemon.bonusAttaque / 100) * capDef.valeur));
             let msgAoe = `💥 ${pokemon.nomFr} utilise ${capDef.nom} ! `;
             cibles.forEach(c => {
+              const pvAvantAoe = c.pvActuels;
               c.pvActuels = Math.max(0, c.pvActuels - degatsParCible);
+              // Focus Sash
+              if (
+                c.pvActuels <= 0 &&
+                pvAvantAoe >= pvMax(c) &&
+                c.item?.id === 'focus-sash' &&
+                !sashUtilise.has(c.instanceId)
+              ) {
+                sashUtilise.add(c.instanceId);
+                c.pvActuels = 1;
+              }
               msgAoe += `${c.nomFr} (−${degatsParCible}) `;
             });
             tourCapacite = { nom: capDef.nom, description: capDef.description, cibleAoe: true };
@@ -131,32 +236,67 @@ export function resoudreCombat(
               pvRestantsDefenseur: cible.pvActuels,
               message: msgAoe.trim(), capacite: tourCapacite,
             });
+            // Pierre de Vie après AoE
+            if (pokemon.item?.id === 'life-orb') {
+              const cout = Math.max(1, Math.floor(pvMax(pokemon) * 0.08));
+              pokemon.pvActuels = Math.max(1, pokemon.pvActuels - cout);
+            }
             break;
           }
           case 'soin_equipe': {
             let msgSoin = `💚 ${pokemon.nomFr} utilise ${capDef.nom} ! `;
             allies.filter(a => a.pvActuels > 0).forEach(a => {
-              const pvMax = a.stats.pv + a.bonusPv;
-              const soin = Math.floor(pvMax * capDef.valeur);
-              a.pvActuels = Math.min(pvMax, a.pvActuels + soin);
+              const max = pvMax(a);
+              const soin = Math.floor(max * capDef.valeur);
+              a.pvActuels = Math.min(max, a.pvActuels + soin);
               msgSoin += `${a.nomFr} (+${soin}) `;
             });
             tourCapacite = { nom: capDef.nom, description: capDef.description };
             // Après soin, attaque normalement
             const { degats, multiplicateur } = calculerDegats(pokemon, cible);
+            const pvAvantSoin = cible.pvActuels;
             cible.pvActuels = Math.max(0, cible.pvActuels - degats);
+            if (
+              cible.pvActuels <= 0 &&
+              pvAvantSoin >= pvMax(cible) &&
+              cible.item?.id === 'focus-sash' &&
+              !sashUtilise.has(cible.instanceId)
+            ) {
+              sashUtilise.add(cible.instanceId);
+              cible.pvActuels = 1;
+            }
             tours.push({
               attaquant: pokemon.nomFr, defenseur: cible.nomFr,
               instanceIdDefenseur: cible.instanceId,
               degats, multiplicateur, pvRestantsDefenseur: cible.pvActuels,
               message: msgSoin.trim(), capacite: tourCapacite,
             });
+            // Pierre de Vie
+            if (pokemon.item?.id === 'life-orb') {
+              const cout = Math.max(1, Math.floor(pvMax(pokemon) * 0.08));
+              pokemon.pvActuels = Math.max(1, pokemon.pvActuels - cout);
+            }
+            // Rocky Helmet
+            if (cible.item?.id === 'rocky-helmet') {
+              const retour = Math.max(1, Math.floor(pvMax(cible) * 0.12));
+              pokemon.pvActuels = Math.max(0, pokemon.pvActuels - retour);
+            }
             break;
           }
           case 'paralysie': {
             paralysieIds.add(cible.instanceId);
             const { degats, multiplicateur } = calculerDegats(pokemon, cible);
+            const pvAvantParalysie = cible.pvActuels;
             cible.pvActuels = Math.max(0, cible.pvActuels - degats);
+            if (
+              cible.pvActuels <= 0 &&
+              pvAvantParalysie >= pvMax(cible) &&
+              cible.item?.id === 'focus-sash' &&
+              !sashUtilise.has(cible.instanceId)
+            ) {
+              sashUtilise.add(cible.instanceId);
+              cible.pvActuels = 1;
+            }
             tourCapacite = { nom: capDef.nom, description: capDef.description };
             tours.push({
               attaquant: pokemon.nomFr, defenseur: cible.nomFr,
@@ -165,13 +305,34 @@ export function resoudreCombat(
               message: `⚡ ${pokemon.nomFr} utilise ${capDef.nom} ! ${cible.nomFr} est paralysé ! (${degats} dégâts)`,
               capacite: tourCapacite,
             });
+            // Pierre de Vie
+            if (pokemon.item?.id === 'life-orb') {
+              const cout = Math.max(1, Math.floor(pvMax(pokemon) * 0.08));
+              pokemon.pvActuels = Math.max(1, pokemon.pvActuels - cout);
+            }
+            // Rocky Helmet
+            if (cible.item?.id === 'rocky-helmet') {
+              const retour = Math.max(1, Math.floor(pvMax(cible) * 0.12));
+              pokemon.pvActuels = Math.max(0, pokemon.pvActuels - retour);
+            }
             break;
           }
         }
       } else {
         // Attaque normale
         const { degats, multiplicateur } = calculerDegats(pokemon, cible);
+        const pvAvantNormal = cible.pvActuels;
         cible.pvActuels = Math.max(0, cible.pvActuels - degats);
+        // Focus Sash : survie à 1PV si KO depuis PV max
+        if (
+          cible.pvActuels <= 0 &&
+          pvAvantNormal >= pvMax(cible) &&
+          cible.item?.id === 'focus-sash' &&
+          !sashUtilise.has(cible.instanceId)
+        ) {
+          sashUtilise.add(cible.instanceId);
+          cible.pvActuels = 1;
+        }
         msg = `${pokemon.nomFr} attaque ${cible.nomFr} pour ${degats} dégâts`;
         if (multiplicateur === 2) msg += ' — C\'est super efficace !';
         else if (multiplicateur === 0.5) msg += ' — Ce n\'est pas très efficace…';
@@ -182,6 +343,23 @@ export function resoudreCombat(
           degats, multiplicateur, pvRestantsDefenseur: cible.pvActuels,
           message: msg,
         });
+        // Pierre de Vie : retire 8% pvMax après attaque
+        if (pokemon.item?.id === 'life-orb') {
+          const cout = Math.max(1, Math.floor(pvMax(pokemon) * 0.08));
+          pokemon.pvActuels = Math.max(1, pokemon.pvActuels - cout);
+        }
+        // Rocky Helmet : l'attaquant prend 12% pvMax du défenseur en retour
+        if (cible.item?.id === 'rocky-helmet') {
+          const retour = Math.max(1, Math.floor(pvMax(cible) * 0.12));
+          pokemon.pvActuels = Math.max(0, pokemon.pvActuels - retour);
+          tours.push({
+            attaquant: cible.nomFr, defenseur: pokemon.nomFr,
+            instanceIdDefenseur: pokemon.instanceId,
+            degats: retour, multiplicateur: 1,
+            pvRestantsDefenseur: pokemon.pvActuels,
+            message: `🪨 Les Restes de Rocher de ${cible.nomFr} blessent ${pokemon.nomFr} de ${retour} PV !`,
+          });
+        }
       }
     }
   }

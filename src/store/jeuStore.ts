@@ -4,11 +4,30 @@ import { create } from 'zustand';
 import type { EtatJeu, PhaseJeu } from '../types/jeu';
 import type { PokemonCache, PokemonEquipe, PokemonBoutique } from '../types/pokemon';
 import { calculerSynergies } from '../data/synergies';
+import { genererItemsAleatoires } from '../data/items';
+import type { ItemJeu } from '../data/items';
 
-const PRIX_POKEMON = 3;
+// Prix selon rareté : ★1=₽2, ★2=₽3, ★3=₽5, ★4=₽9
+const PRIX_PAR_RARETE: Record<1 | 2 | 3 | 4, number> = { 1: 2, 2: 3, 3: 5, 4: 9 };
 const COUT_REFRESH_BASE = 2;
 const PV_JOUEUR_MAX = 100;
 const CLE_MEILLEUR_ETAGE = 'pokedraft_meilleur_etage';
+const NB_ETAGES_TOTAL = 15;
+const NB_ITEMS_BOUTIQUE = 3;
+
+export type TypeEtage = 'combat' | 'repos' | 'boutique_bonus' | 'boss';
+
+/** Génère la carte des 15 étages : 5/10/15 = boss, autres = 65% combat / 20% repos / 15% boutique_bonus */
+function genererCarteEtages(): TypeEtage[] {
+  return Array.from({ length: NB_ETAGES_TOTAL }, (_, i) => {
+    const num = i + 1;
+    if (num === 5 || num === 10 || num === 15) return 'boss';
+    const r = Math.random();
+    if (r < 0.65) return 'combat';
+    if (r < 0.85) return 'repos';
+    return 'boutique_bonus';
+  });
+}
 
 function chargerMeilleurEtage(): number {
   return parseInt(localStorage.getItem(CLE_MEILLEUR_ETAGE) ?? '0', 10) || 0;
@@ -42,7 +61,8 @@ function tirerBoutique(cache: PokemonCache[], exclude: string[] = []): PokemonBo
     const idx = Math.floor(Math.random() * disponibles.length);
     if (!indices.has(idx)) {
       indices.add(idx);
-      selection.push({ ...disponibles[idx], prix: PRIX_POKEMON, achete: false });
+      const pokemon = disponibles[idx];
+      selection.push({ ...pokemon, prix: PRIX_PAR_RARETE[pokemon.rarete], achete: false });
     }
   }
   return selection;
@@ -60,12 +80,17 @@ interface ActionsJeu {
   appliquerResultatCombat: (degatsJoueur: number, victoire: boolean) => void;
   passerEtage: () => void;
   fuir: () => void;
+  acheterItem: (item: ItemJeu) => void;
+  equiperItemSurPokemon: (instanceId: string) => void;
 }
 
 interface StoreJeu extends EtatJeu, ActionsJeu {
   cachePokemons: PokemonCache[];
   synergiesActives: ReturnType<typeof calculerSynergies>;
   meilleurEtage: number;
+  boutiqueItems: ItemJeu[];
+  itemEnAttente: ItemJeu | null;
+  carteEtages: TypeEtage[];
 }
 
 export const useJeuStore = create<StoreJeu>((set, get) => ({
@@ -82,10 +107,15 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
   cachePokemons: [],
   synergiesActives: [],
   meilleurEtage: chargerMeilleurEtage(),
+  boutiqueItems: [],
+  itemEnAttente: null,
+  carteEtages: genererCarteEtages(),
 
   initialiserCache: (cache) => {
     const boutique = tirerBoutique(cache);
-    set({ cachePokemons: cache, boutique, phase: 'draft' });
+    const carteEtages = genererCarteEtages();
+    const boutiqueItems = genererItemsAleatoires(NB_ITEMS_BOUTIQUE);
+    set({ cachePokemons: cache, boutique, phase: 'draft', carteEtages, boutiqueItems });
   },
 
   acheterPokemon: (boutiquePokemon) => {
@@ -222,6 +252,9 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
     const recompense = 5 + etage;
     const nouvelEtage = etage + 1;
     sauvegarderMeilleurEtage(nouvelEtage);
+    const { carteEtages } = get();
+    const typeProchainEtage = carteEtages[nouvelEtage - 1] as TypeEtage | undefined;
+    const nbItems = typeProchainEtage === 'boutique_bonus' ? 4 : NB_ITEMS_BOUTIQUE;
     set({
       pvJoueur: nouveauxPv,
       phase: 'draft',
@@ -231,18 +264,24 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
       meilleurEtage: Math.max(chargerMeilleurEtage(), nouvelEtage),
       pokedollars: pokedollars + recompense,
       boutique: tirerBoutique(cachePokemons),
+      boutiqueItems: genererItemsAleatoires(nbItems),
       coutRefresh: COUT_REFRESH_BASE,
     });
   },
 
   passerEtage: () => {
-    const { etage, pokedollars, cachePokemons } = get();
+    const { etage, pokedollars, cachePokemons, carteEtages } = get();
+    const nouvelEtage = etage + 1;
+    const typeEtage = carteEtages[nouvelEtage - 1] as TypeEtage | undefined;
+    const nbItems = typeEtage === 'boutique_bonus' ? 4 : NB_ITEMS_BOUTIQUE;
     const boutique = tirerBoutique(cachePokemons);
+    const boutiqueItems = genererItemsAleatoires(nbItems);
     const recompense = 5 + etage;
     set({
-      etage: etage + 1,
+      etage: nouvelEtage,
       pokedollars: pokedollars + recompense,
       boutique,
+      boutiqueItems,
       coutRefresh: COUT_REFRESH_BASE, // Réinitialise le coût de refresh à chaque étage
       phase: 'draft',
     });
@@ -257,13 +296,44 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
       return;
     }
     const boutique = tirerBoutique(cachePokemons);
+    const boutiqueItems = genererItemsAleatoires(NB_ITEMS_BOUTIQUE);
     set({
       pvJoueur: nouveauxPv,
       etage: etage + 1,
       pokedollars: pokedollars + 2, // Petite récompense symbolique
       boutique,
+      boutiqueItems,
       coutRefresh: COUT_REFRESH_BASE,
       phase: 'draft',
     });
+  },
+
+  acheterItem: (item: ItemJeu) => {
+    const { pokedollars, boutiqueItems } = get();
+    if (pokedollars < item.prix) return;
+    // Marque l'item comme en attente d'équipement, retire-le de la boutique
+    const nouveauxItems = boutiqueItems.filter(i => i.instanceId !== item.instanceId);
+    set({
+      pokedollars: pokedollars - item.prix,
+      itemEnAttente: item,
+      boutiqueItems: nouveauxItems,
+    });
+  },
+
+  equiperItemSurPokemon: (instanceId: string) => {
+    const { itemEnAttente, terrain, banc } = get();
+    if (!itemEnAttente) return;
+
+    const equiperSurSlots = (slots: (PokemonEquipe | null)[]) =>
+      slots.map(p => {
+        if (p?.instanceId !== instanceId) return p;
+        // Un Pokémon ne peut porter qu'un seul item
+        return { ...p, item: itemEnAttente, itemConsomme: false };
+      });
+
+    const nouveauTerrain = equiperSurSlots(terrain) as typeof terrain;
+    const nouveauBanc = equiperSurSlots(banc) as typeof banc;
+
+    set({ terrain: nouveauTerrain, banc: nouveauBanc, itemEnAttente: null });
   },
 }));

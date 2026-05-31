@@ -3,12 +3,22 @@ import { useJeuStore } from '../store/jeuStore';
 import { resoudreCombat, genererEquipeEnnemi } from '../services/moteurCombat';
 import type { TourCombat } from '../types/jeu';
 import type { PokemonEquipe } from '../types/pokemon';
+import { Audio } from '../services/audioService';
 
-// Pokémon miniature avec animation au coup
+// Couleur de flash par type pour les animations de capacité
+const FLASH_TYPE: Record<string, string> = {
+  fire: 'hue-rotate-0 saturate-200', water: 'hue-rotate-180 saturate-200',
+  grass: 'hue-rotate-90 saturate-200', electric: 'sepia saturate-[10]',
+  psychic: 'hue-rotate-300 saturate-200', ice: 'hue-rotate-150 saturate-150',
+  fighting: 'hue-rotate-0 saturate-150', dragon: 'hue-rotate-240 saturate-200',
+  ghost: 'hue-rotate-270 saturate-150', dark: 'brightness-50',
+};
+
+// Pokémon miniature avec animation au coup et flash de capacité
 function MiniPokemon({
-  p, mort, enCoup, recoitSoin,
+  p, mort, enCoup, recoitSoin, flashCapacite,
 }: {
-  p: PokemonEquipe; mort?: boolean; enCoup?: boolean; recoitSoin?: boolean;
+  p: PokemonEquipe; mort?: boolean; enCoup?: boolean; recoitSoin?: boolean; flashCapacite?: string;
 }) {
   const pct = p.pvActuels / Math.max(1, p.stats.pv + p.bonusPv) * 100;
   const coulPv = pct > 50 ? 'bg-green-400' : pct > 25 ? 'bg-yellow-400' : 'bg-red-500';
@@ -18,17 +28,29 @@ function MiniPokemon({
       className={`
         flex flex-col items-center gap-0.5 transition-all duration-200
         ${mort ? 'opacity-25 grayscale' : ''}
-        ${enCoup ? 'animate-shake' : ''}
       `}
       style={enCoup ? { animation: 'shake 0.3s ease-in-out' } : undefined}
     >
-      {/* Flash de dégâts / soin */}
       <div className="relative">
+        {/* Halo de capacité */}
+        {flashCapacite && (
+          <div className="absolute inset-0 rounded-full animate-ping opacity-60"
+            style={{ background: flashCapacite }} />
+        )}
         <img
           src={p.sprite}
           alt={p.nomFr}
-          className={`w-14 h-14 object-contain transition-all duration-150 ${enCoup ? 'brightness-200' : recoitSoin ? 'brightness-150 saturate-200 hue-rotate-90' : ''}`}
+          className={`w-14 h-14 object-contain transition-all duration-150
+            ${enCoup ? 'brightness-200' : ''}
+            ${recoitSoin ? 'brightness-150 hue-rotate-90 saturate-200' : ''}
+            ${flashCapacite ? (FLASH_TYPE[p.types[0]] ?? '') : ''}
+          `}
         />
+        {/* Badge item équipé */}
+        {p.item && (
+          <img src={p.item.sprite} alt={p.item.nom}
+            className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-gray-900 border border-white/20 p-0.5" />
+        )}
       </div>
       <p className="text-[10px] text-white/70 font-bold truncate max-w-[60px] text-center">{p.nomFr}</p>
       <div className="w-12 bg-black/40 rounded-full h-1.5">
@@ -75,6 +97,15 @@ function EcranVictoire({ etage, recompense, onContinuer }: { etage: number; reco
   );
 }
 
+// Couleur CSS par type pour le halo de capacité
+const HALO_COULEUR: Record<string, string> = {
+  fire: '#f97316', water: '#3b82f6', grass: '#22c55e', electric: '#eab308',
+  psychic: '#ec4899', ice: '#67e8f9', fighting: '#ef4444', dragon: '#6366f1',
+  ghost: '#8b5cf6', dark: '#374151', normal: '#9ca3af', poison: '#a855f7',
+  ground: '#ca8a04', flying: '#818cf8', bug: '#84cc16', rock: '#78716c',
+  steel: '#94a3b8', fairy: '#f9a8d4',
+};
+
 export function CombatPage() {
   const { terrain, cachePokemons, etage, appliquerResultatCombat } = useJeuStore();
   const [phase, setPhase] = useState<'preparation' | 'combat' | 'resultat'>('preparation');
@@ -86,6 +117,8 @@ export function CombatPage() {
   const [idEnCoup, setIdEnCoup] = useState<string | null>(null);
   const [idsEnSoin, setIdsEnSoin] = useState<string[]>([]);
   const [afficherVictoire, setAfficherVictoire] = useState(false);
+  // instanceId + type du Pokémon qui vient de déclencher une capacité
+  const [flashCapacite, setFlashCapacite] = useState<{ id: string; type: string } | null>(null);
   const journalRef = useRef<HTMLDivElement>(null);
 
   const equipeJoueur = terrain.filter(Boolean) as PokemonEquipe[];
@@ -102,8 +135,21 @@ export function CombatPage() {
       if (t.degats > 0) {
         setIdEnCoup(t.instanceIdDefenseur);
         setTimeout(() => setIdEnCoup(null), 350);
+        // Son différent selon capacité ou coup normal
+        if (t.capacite) {
+          // Trouve le type de l'attaquant pour le flash
+          const attaquant = [...equipeJoueur, ...equipeEnnemi].find(p => p.nomFr === t.attaquant);
+          if (attaquant) {
+            const type = attaquant.types[0];
+            Audio.capacite(type);
+            setFlashCapacite({ id: attaquant.instanceId, type });
+            setTimeout(() => setFlashCapacite(null), 700);
+          }
+        } else {
+          Audio.coup();
+        }
       }
-      if (t.capacite && (t.capacite.description.includes('Soigne') || t.capacite.description.includes('soin'))) {
+      if (t.capacite && (t.capacite.description.includes('Soigne') || t.message.includes('💚'))) {
         const allIds = [...equipeJoueur, ...equipeEnnemi].map(p => p.instanceId);
         setIdsEnSoin(allIds);
         setTimeout(() => setIdsEnSoin([]), 500);
@@ -127,7 +173,8 @@ export function CombatPage() {
         clearInterval(iv);
         setTimeout(() => {
           setPhase('resultat');
-          if (res.victoire) setAfficherVictoire(true);
+          if (res.victoire) { setAfficherVictoire(true); Audio.victoire(); }
+          else Audio.defaite();
         }, 700);
       }
     }, 450);
@@ -192,6 +239,11 @@ export function CombatPage() {
                     mort={p.pvActuels <= 0}
                     enCoup={idEnCoup === p.instanceId}
                     recoitSoin={idsEnSoin.includes(p.instanceId)}
+                    flashCapacite={
+                      flashCapacite?.id === p.instanceId
+                        ? HALO_COULEUR[flashCapacite.type] ?? '#ffffff'
+                        : undefined
+                    }
                   />
                 ))}
               </div>
@@ -206,6 +258,11 @@ export function CombatPage() {
                     mort={p.pvActuels <= 0}
                     enCoup={idEnCoup === p.instanceId}
                     recoitSoin={idsEnSoin.includes(p.instanceId)}
+                    flashCapacite={
+                      flashCapacite?.id === p.instanceId
+                        ? HALO_COULEUR[flashCapacite.type] ?? '#ffffff'
+                        : undefined
+                    }
                   />
                 ))}
               </div>

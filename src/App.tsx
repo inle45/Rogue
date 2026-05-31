@@ -11,7 +11,7 @@ export default function App() {
   const etage = useJeuStore(s => s.etage);
 
   const recommencer = () => {
-    localStorage.removeItem('pokedraft_cache_v1');
+    localStorage.removeItem('pokedraft_cache_v2');
     window.location.reload();
   };
 

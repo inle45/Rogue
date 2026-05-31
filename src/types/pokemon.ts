@@ -14,6 +14,8 @@ export interface PokemonCache {
   types: string[];
   stats: StatsPokemon;
   sprite: string;
+  bst: number;
+  rarete: 1 | 2 | 3 | 4;
 }
 
 export interface PokemonEquipe extends PokemonCache {
@@ -22,6 +24,8 @@ export interface PokemonEquipe extends PokemonCache {
   bonusAttaque: number;
   bonusDefense: number;
   bonusPv: number;
+  item?: import('../data/items').ItemJeu;
+  itemConsomme?: boolean;
 }
 
 export interface PokemonBoutique extends PokemonCache {
