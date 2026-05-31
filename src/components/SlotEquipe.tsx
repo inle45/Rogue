@@ -11,7 +11,9 @@ interface Props {
 
 export function SlotEquipe({ pokemon, index, type }: Props) {
   const [survol, setSurvol] = useState(false);
+  const [survolCarte, setSurvolCarte] = useState(false);
   const echangerSlots = useJeuStore(s => s.echangerSlots);
+  const vendrePokemon = useJeuStore(s => s.vendrePokemon);
 
   const onDragStart = (e: React.DragEvent) => {
     if (!pokemon) return;
@@ -32,25 +34,50 @@ export function SlotEquipe({ pokemon, index, type }: Props) {
   return (
     <div
       className={`
-        rounded-2xl min-h-[140px] flex items-center justify-center transition-all duration-150
+        relative rounded-2xl min-h-[140px] flex items-center justify-center transition-all duration-150
         ${survol
           ? 'border-2 border-cyan-400 bg-cyan-900/20 scale-[1.02]'
           : pokemon
             ? 'border border-white/10'
-            : 'border border-dashed border-white/15 bg-white/2'}
+            : 'border border-dashed border-white/15'}
       `}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
+      onMouseEnter={() => setSurvolCarte(true)}
+      onMouseLeave={() => setSurvolCarte(false)}
     >
       {pokemon ? (
-        <CartePokemon
-          pokemon={pokemon}
-          draggable
-          onDragStart={onDragStart}
-          compact
-          afficherStats={false}
-        />
+        <>
+          <CartePokemon
+            pokemon={pokemon}
+            draggable
+            onDragStart={onDragStart}
+            compact
+            afficherStats={false}
+          />
+          {/* Bouton vente — visible au survol */}
+          <button
+            onClick={() => vendrePokemon(pokemon.instanceId)}
+            className={`
+              absolute top-1.5 right-1.5 w-6 h-6 rounded-full
+              bg-red-900/80 border border-red-700/60 text-red-300
+              text-[10px] font-black flex items-center justify-center
+              transition-all duration-150
+              ${survolCarte ? 'opacity-100 scale-100' : 'opacity-0 scale-75'}
+              hover:bg-red-700 hover:text-white z-10
+            `}
+            title="Vendre ce Pokémon (+₽1)"
+          >
+            ✕
+          </button>
+          {/* Prix de vente au survol */}
+          {survolCarte && (
+            <div className="absolute bottom-1.5 right-1.5 bg-yellow-900/70 border border-yellow-700/40 rounded-lg px-1.5 py-0.5 text-[9px] text-yellow-400 font-bold z-10">
+              Vendre ₽1
+            </div>
+          )}
+        </>
       ) : (
         <div className="flex flex-col items-center gap-1 text-white/20">
           <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">

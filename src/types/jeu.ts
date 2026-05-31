@@ -34,9 +34,11 @@ export interface ResultatCombat {
 export interface TourCombat {
   attaquant: string;
   defenseur: string;
-  instanceIdDefenseur: string; // pour tracker les PV sans collision sur les doublons de nom
+  instanceIdDefenseur: string;
   degats: number;
   multiplicateur: number;
   pvRestantsDefenseur: number;
   message: string;
+  // présent si une capacité spéciale s'est déclenchée ce tour
+  capacite?: { nom: string; description: string; cibleAoe?: boolean };
 }

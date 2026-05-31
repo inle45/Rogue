@@ -8,6 +8,15 @@ import { calculerSynergies } from '../data/synergies';
 const PRIX_POKEMON = 3;
 const COUT_REFRESH_BASE = 2;
 const PV_JOUEUR_MAX = 100;
+const CLE_MEILLEUR_ETAGE = 'pokedraft_meilleur_etage';
+
+function chargerMeilleurEtage(): number {
+  return parseInt(localStorage.getItem(CLE_MEILLEUR_ETAGE) ?? '0', 10) || 0;
+}
+function sauvegarderMeilleurEtage(etage: number) {
+  const actuel = chargerMeilleurEtage();
+  if (etage > actuel) localStorage.setItem(CLE_MEILLEUR_ETAGE, String(etage));
+}
 
 function genererInstanceId(): string {
   return Math.random().toString(36).slice(2, 9);
@@ -42,6 +51,7 @@ function tirerBoutique(cache: PokemonCache[], exclude: string[] = []): PokemonBo
 interface ActionsJeu {
   initialiserCache: (cache: PokemonCache[]) => void;
   acheterPokemon: (boutiquePokemon: PokemonBoutique) => void;
+  vendrePokemon: (instanceId: string) => void;
   refreshBoutique: () => void;
   deplacerVersTerrain: (instanceId: string, slotTerrain: number) => void;
   deplacerVersBanc: (instanceId: string, slotBanc: number) => void;
@@ -49,12 +59,13 @@ interface ActionsJeu {
   lancerCombat: () => void;
   appliquerResultatCombat: (degatsJoueur: number, victoire: boolean) => void;
   passerEtage: () => void;
-  fuir: () => void; // Fuit le combat contre 20 PV, passe à l'étage suivant
+  fuir: () => void;
 }
 
 interface StoreJeu extends EtatJeu, ActionsJeu {
   cachePokemons: PokemonCache[];
   synergiesActives: ReturnType<typeof calculerSynergies>;
+  meilleurEtage: number;
 }
 
 export const useJeuStore = create<StoreJeu>((set, get) => ({
@@ -70,6 +81,7 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
   coutRefresh: COUT_REFRESH_BASE,
   cachePokemons: [],
   synergiesActives: [],
+  meilleurEtage: chargerMeilleurEtage(),
 
   initialiserCache: (cache) => {
     const boutique = tirerBoutique(cache);
@@ -110,6 +122,16 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
       boutique: nouvelleBoutique,
       synergiesActives,
     });
+  },
+
+  vendrePokemon: (instanceId) => {
+    const { terrain, banc, pokedollars } = get();
+    const supprimer = (slots: (PokemonEquipe | null)[]) =>
+      slots.map(p => (p?.instanceId === instanceId ? null : p));
+    const nouveauTerrain = supprimer(terrain) as typeof terrain;
+    const nouveauBanc = supprimer(banc) as typeof banc;
+    const synergiesActives = calculerSynergies(nouveauTerrain);
+    set({ terrain: nouveauTerrain, banc: nouveauBanc, pokedollars: pokedollars + 1, synergiesActives });
   },
 
   refreshBoutique: () => {
@@ -198,12 +220,15 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
     };
 
     const recompense = 5 + etage;
+    const nouvelEtage = etage + 1;
+    sauvegarderMeilleurEtage(nouvelEtage);
     set({
       pvJoueur: nouveauxPv,
       phase: 'draft',
       terrain: terrain.map(soigner) as typeof terrain,
       banc: banc.map(soigner) as typeof banc,
-      etage: etage + 1,
+      etage: nouvelEtage,
+      meilleurEtage: Math.max(chargerMeilleurEtage(), nouvelEtage),
       pokedollars: pokedollars + recompense,
       boutique: tirerBoutique(cachePokemons),
       coutRefresh: COUT_REFRESH_BASE,

@@ -15,7 +15,7 @@ function compterTypeEquipe(equipe: (PokemonEquipe | null)[], type: string): numb
 export function DraftPage() {
   const [onglet, setOnglet] = useState<Onglet>('boutique');
   const {
-    pokedollars, pvJoueur, pvJoueurMax, etage,
+    pokedollars, pvJoueur, pvJoueurMax, etage, meilleurEtage,
     terrain, banc, boutique, coutRefresh,
     acheterPokemon, refreshBoutique, lancerCombat, fuir,
   } = useJeuStore();
@@ -33,10 +33,13 @@ export function DraftPage() {
       {/* ── Header ── */}
       <header className="sticky top-0 z-20 bg-gray-950/95 backdrop-blur border-b border-white/8 px-4 py-2.5">
         <div className="flex items-center gap-3 max-w-lg mx-auto">
-          {/* Étage */}
+          {/* Étage + record */}
           <div className="flex flex-col items-center min-w-[36px]">
             <span className="text-[9px] text-white/40 tracking-widest">ÉTAGE</span>
             <span className="text-xl font-black text-cyan-400 leading-none">{etage}</span>
+            {meilleurEtage > 0 && (
+              <span className="text-[9px] text-yellow-600">🏆{meilleurEtage}</span>
+            )}
           </div>
 
           <div className="w-px h-8 bg-white/10" />
