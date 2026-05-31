@@ -115,6 +115,41 @@ function appliquerReliquesEquipe(equipe: PokemonEquipe[], reliques: DefinitionRe
   });
 }
 
+/** Applique les buffs de positionnement sur l'équipe :
+ *  Slot 0 (Avant / Tank)  → +15% DEF
+ *  Slot 2 (Arrière / DPS) → +15% ATK
+ */
+function appliquerBuffsPosition(equipe: PokemonEquipe[]): PokemonEquipe[] {
+  return equipe.map((p, i) => {
+    if (i === 0) {
+      return { ...p, stats: { ...p.stats, defense: Math.floor(p.stats.defense * 1.15) } };
+    }
+    if (i === 2) {
+      return { ...p, stats: { ...p.stats, attaque: Math.floor(p.stats.attaque * 1.15) } };
+    }
+    return p;
+  });
+}
+
+/** Sélectionne une cible en fonction de sa position dans l'équipe.
+ *  Slot 0 (front) : 60 % de chance, Slot 1 (mid) : 30 %, Slot 2 (back) : 10 %.
+ *  Si un slot est KO, son poids est réparti proportionnellement sur les vivants.
+ */
+function ciblerParPosition(equipeComplete: PokemonEquipe[]): PokemonEquipe | null {
+  const POIDS_SLOT = [60, 30, 10];
+  const options = equipeComplete
+    .map((p, i) => ({ pokemon: p, poids: POIDS_SLOT[i] ?? 5 }))
+    .filter(({ pokemon }) => pokemon.pvActuels > 0);
+  if (!options.length) return null;
+  const totalPoids = options.reduce((s, o) => s + o.poids, 0);
+  let rand = Math.random() * totalPoids;
+  for (const { pokemon, poids } of options) {
+    rand -= poids;
+    if (rand <= 0) return pokemon;
+  }
+  return options[options.length - 1].pokemon;
+}
+
 // Essaie d'appliquer un statut à un Pokémon (15% de chance)
 function tentativeStatut(
   cible: PokemonEquipe,
@@ -136,12 +171,16 @@ export function resoudreCombat(
   estBoss = false,
 ): ResultatCombat {
   let joueurs = appliquerBonusSynergies(equipeJoueur.map(p => ({ ...p })));
-  const ennemis = appliquerBonusSynergies(equipeEnnemi.map(p => ({ ...p })));
+  let ennemis = appliquerBonusSynergies(equipeEnnemi.map(p => ({ ...p })));
 
   // Applique les reliques à l'équipe joueur
   if (reliques.length > 0) {
     joueurs = appliquerReliquesEquipe(joueurs, reliques);
   }
+
+  // Buffs de positionnement (après synergies et reliques)
+  joueurs = appliquerBuffsPosition(joueurs);
+  ennemis = appliquerBuffsPosition(ennemis);
 
   const tours: TourCombat[] = [];
   const meteoData = METEOS[meteo];
@@ -344,13 +383,15 @@ export function resoudreCombat(
         continue;
       }
 
-      const cibles = equipe === 'joueur'
-        ? ennemis.filter(p => p.pvActuels > 0)
-        : joueurs.filter(p => p.pvActuels > 0);
+      const equipeAdverse = equipe === 'joueur' ? ennemis : joueurs;
+      const cibles = equipeAdverse.filter(p => p.pvActuels > 0);
       const allies = equipe === 'joueur' ? joueurs : ennemis;
       if (!cibles.length) break;
 
-      const cible = cibles.reduce((min, p) => p.pvActuels < min.pvActuels ? p : min);
+      // Ciblage positionnel : 60 % slot Avant, 30 % slot Mid, 10 % slot DPS
+      const cible = ciblerParPosition(equipeAdverse) ?? cibles[0];
+      const slotIdx = equipeAdverse.findIndex(p => p === cible);
+      const roleTag = slotIdx === 0 ? ' [🛡 Tank]' : slotIdx === 2 ? ' [⚔ DPS]' : ' [Mid]';
 
       // Incrémente le compteur d'attaques
       compteurAttaques[pokemon.instanceId] = (compteurAttaques[pokemon.instanceId] ?? 0) + 1;
@@ -578,7 +619,7 @@ export function resoudreCombat(
           else if (typeCapacite === 'poison') { cible.statut = 'poison'; statutApplique = 'poison'; }
         }
 
-        msg = `${pokemon.nomFr} utilise ${nomAttaque} → ${cible.nomFr} perd ${degats} PV`;
+        msg = `${pokemon.nomFr} utilise ${nomAttaque} → ${cible.nomFr}${roleTag} perd ${degats} PV`;
         if (estCritique) msg += ' 💥 CRITIQUE !';
         else if (multiplicateur === 2) msg += ' — C\'est super efficace !';
         else if (multiplicateur === 0.5) msg += ' — Ce n\'est pas très efficace…';

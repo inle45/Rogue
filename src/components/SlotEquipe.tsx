@@ -32,6 +32,14 @@ export function SlotEquipe({ pokemon, index, type }: Props) {
     if (instanceId) echangerSlots(instanceId, sourceType, index, type);
   };
 
+  // Définition des rôles par slot terrain
+  const ROLES = [
+    { label: '🛡 TANK', couleurBg: 'bg-blue-900/80', couleurBorder: 'border-blue-600/50', couleurTexte: 'text-blue-300', buff: '+15% DEF' },
+    { label: '◈ MID',  couleurBg: 'bg-purple-900/80', couleurBorder: 'border-purple-600/50', couleurTexte: 'text-purple-300', buff: '' },
+    { label: '⚔ DPS',  couleurBg: 'bg-orange-900/80', couleurBorder: 'border-orange-600/50', couleurTexte: 'text-orange-300', buff: '+15% ATK' },
+  ];
+  const role = type === 'terrain' ? ROLES[index] : null;
+
   return (
     <div
       className={`
@@ -39,7 +47,7 @@ export function SlotEquipe({ pokemon, index, type }: Props) {
         ${survol
           ? 'border-2 border-cyan-400 bg-cyan-900/20 scale-[1.02]'
           : pokemon
-            ? 'border border-white/10'
+            ? `border ${role ? role.couleurBorder : 'border-white/10'}`
             : 'border border-dashed border-white/15'}
       `}
       onDragOver={onDragOver}
@@ -48,8 +56,16 @@ export function SlotEquipe({ pokemon, index, type }: Props) {
       onMouseEnter={() => setSurvolCarte(true)}
       onMouseLeave={() => setSurvolCarte(false)}
     >
+      {/* Bandeau de rôle en haut du slot (terrain uniquement) */}
+      {role && (
+        <div className={`absolute top-0 inset-x-0 flex items-center justify-between px-2 py-0.5 rounded-t-2xl z-20 ${role.couleurBg}`}>
+          <span className={`text-[8px] font-black ${role.couleurTexte}`}>{role.label}</span>
+          {role.buff && <span className={`text-[7px] font-bold ${role.couleurTexte} opacity-70`}>{role.buff}</span>}
+        </div>
+      )}
+
       {pokemon ? (
-        <>
+        <div className="w-full pt-4">
           <CartePokemon
             pokemon={pokemon}
             draggable
@@ -59,7 +75,7 @@ export function SlotEquipe({ pokemon, index, type }: Props) {
           />
           {/* Badge shiny dans le slot */}
           {pokemon.shiny && (
-            <div className="absolute top-1.5 left-1.5 z-10 text-base leading-none" title="Pokémon Shiny">
+            <div className="absolute top-6 left-1.5 z-10 text-base leading-none" title="Pokémon Shiny">
               ✨
             </div>
           )}
@@ -90,15 +106,15 @@ export function SlotEquipe({ pokemon, index, type }: Props) {
               Vendre ₽1
             </div>
           )}
-        </>
+        </div>
       ) : (
-        <div className="flex flex-col items-center gap-1 text-white/20">
+        <div className="flex flex-col items-center gap-1 text-white/20 mt-4">
           <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <circle cx="12" cy="12" r="10" strokeWidth="1.5" strokeDasharray="4 2" />
             <line x1="12" y1="8" x2="12" y2="16" strokeWidth="1.5" />
             <line x1="8" y1="12" x2="16" y2="12" strokeWidth="1.5" />
           </svg>
-          <span className="text-[10px]">{type === 'terrain' ? 'Terrain' : 'Banc'} {index + 1}</span>
+          <span className="text-[10px]">{type === 'terrain' ? role?.label ?? `Terrain ${index + 1}` : `Banc ${index + 1}`}</span>
         </div>
       )}
     </div>
