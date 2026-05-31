@@ -1,49 +1,75 @@
-// Carte visuelle d'un Pokémon — utilisée en boutique et en équipe
-
+import React from 'react';
 import type { PokemonCache, PokemonEquipe } from '../types/pokemon';
 import { CarteType } from './CarteType';
+
+const GRADIENT_TYPE: Record<string, string> = {
+  fire:     'from-orange-900/60 to-red-950/80',
+  water:    'from-blue-900/60 to-cyan-950/80',
+  grass:    'from-green-900/60 to-emerald-950/80',
+  electric: 'from-yellow-800/60 to-amber-950/80',
+  ice:      'from-cyan-800/60 to-blue-950/80',
+  fighting: 'from-red-900/60 to-rose-950/80',
+  poison:   'from-purple-900/60 to-violet-950/80',
+  ground:   'from-yellow-900/60 to-stone-950/80',
+  flying:   'from-indigo-800/60 to-slate-950/80',
+  psychic:  'from-pink-900/60 to-rose-950/80',
+  bug:      'from-lime-900/60 to-green-950/80',
+  rock:     'from-stone-800/60 to-gray-950/80',
+  ghost:    'from-violet-900/60 to-purple-950/80',
+  dragon:   'from-indigo-900/60 to-blue-950/80',
+  dark:     'from-gray-800/60 to-zinc-950/80',
+  steel:    'from-slate-700/60 to-gray-950/80',
+  fairy:    'from-pink-800/60 to-rose-950/80',
+  normal:   'from-gray-700/60 to-gray-950/80',
+};
+
+const BORDURE_TYPE: Record<string, string> = {
+  fire: 'border-orange-700/50', water: 'border-blue-700/50', grass: 'border-green-700/50',
+  electric: 'border-yellow-600/50', ice: 'border-cyan-600/50', fighting: 'border-red-700/50',
+  poison: 'border-purple-700/50', ground: 'border-yellow-800/50', flying: 'border-indigo-600/50',
+  psychic: 'border-pink-700/50', bug: 'border-lime-700/50', rock: 'border-stone-600/50',
+  ghost: 'border-violet-700/50', dragon: 'border-indigo-700/50', dark: 'border-gray-600/50',
+  steel: 'border-slate-500/50', fairy: 'border-pink-600/50', normal: 'border-gray-600/50',
+};
 
 interface Props {
   pokemon: PokemonCache | PokemonEquipe;
   onClick?: () => void;
   selectionne?: boolean;
   afficherStats?: boolean;
-  petit?: boolean;
+  compact?: boolean;
   draggable?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
-  onDragOver?: (e: React.DragEvent) => void;
   onDrop?: (e: React.DragEvent) => void;
+  onDragOver?: (e: React.DragEvent) => void;
 }
 
-function estPokemonEquipe(p: PokemonCache | PokemonEquipe): p is PokemonEquipe {
+function estEquipe(p: PokemonCache | PokemonEquipe): p is PokemonEquipe {
   return 'pvActuels' in p;
 }
 
 export function CartePokemon({
-  pokemon,
-  onClick,
-  selectionne,
-  afficherStats = true,
-  petit = false,
-  draggable,
-  onDragStart,
-  onDragOver,
-  onDrop,
+  pokemon, onClick, selectionne, afficherStats = true, compact = false,
+  draggable, onDragStart, onDrop, onDragOver,
 }: Props) {
-  const estEquipe = estPokemonEquipe(pokemon);
-  const pvMax = estEquipe ? pokemon.stats.pv + pokemon.bonusPv : pokemon.stats.pv;
-  const pvActuels = estEquipe ? pokemon.pvActuels : pvMax;
-  const pourcentagePv = pvMax > 0 ? (pvActuels / pvMax) * 100 : 0;
+  const isEquipe = estEquipe(pokemon);
+  const typeP = pokemon.types[0] || 'normal';
+  const gradient = GRADIENT_TYPE[typeP] || GRADIENT_TYPE.normal;
+  const bordure = BORDURE_TYPE[typeP] || BORDURE_TYPE.normal;
 
-  const couleurPv = pourcentagePv > 60 ? 'bg-green-500' : pourcentagePv > 30 ? 'bg-yellow-500' : 'bg-red-500';
+  const pvMax = isEquipe ? pokemon.stats.pv + pokemon.bonusPv : pokemon.stats.pv;
+  const pvActuels = isEquipe ? pokemon.pvActuels : pvMax;
+  const pctPv = pvMax > 0 ? (pvActuels / pvMax) * 100 : 100;
+  const couleurPv = pctPv > 60 ? 'bg-green-400' : pctPv > 30 ? 'bg-yellow-400' : 'bg-red-500';
 
   return (
     <div
       className={`
-        relative rounded-xl border-2 cursor-pointer transition-all duration-200
-        ${selectionne ? 'border-cyan-400 shadow-lg shadow-cyan-500/30' : 'border-gray-700 hover:border-gray-500'}
-        ${petit ? 'p-2' : 'p-3'}
-        bg-gray-900 flex flex-col items-center gap-1
+        relative rounded-2xl border overflow-hidden cursor-pointer
+        bg-gradient-to-b ${gradient} ${bordure}
+        transition-all duration-200 select-none
+        ${selectionne ? 'ring-2 ring-cyan-400 ring-offset-1 ring-offset-gray-950' : 'hover:brightness-110'}
+        ${compact ? 'w-full' : 'w-full'}
       `}
       onClick={onClick}
       draggable={draggable}
@@ -51,46 +77,47 @@ export function CartePokemon({
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
-      {/* Sprite */}
-      <img
-        src={pokemon.sprite}
-        alt={pokemon.nomFr}
-        className={`${petit ? 'w-14 h-14' : 'w-20 h-20'} object-contain drop-shadow-lg`}
-        style={{ imageRendering: 'pixelated' }}
-      />
-
-      {/* Nom */}
-      <p className={`font-bold text-white ${petit ? 'text-xs' : 'text-sm'} text-center`}>
-        {pokemon.nomFr}
-      </p>
-
-      {/* Types */}
-      <div className="flex gap-1 flex-wrap justify-center">
-        {pokemon.types.map(t => <CarteType key={t} type={t} petit={petit} />)}
+      {/* Sprite avec fond brillant */}
+      <div className="relative flex justify-center pt-2 pb-0">
+        <div className="absolute inset-0 bg-white/5 rounded-full scale-75 blur-xl" />
+        <img
+          src={pokemon.sprite}
+          alt={pokemon.nomFr}
+          className={`relative z-10 object-contain drop-shadow-2xl ${compact ? 'w-16 h-16' : 'w-24 h-24'}`}
+          style={{ imageRendering: 'auto' }}
+        />
       </div>
 
-      {/* Barre de PV */}
-      {estEquipe && (
-        <div className="w-full">
-          <div className="w-full bg-gray-700 rounded-full h-1.5">
-            <div
-              className={`${couleurPv} h-1.5 rounded-full transition-all`}
-              style={{ width: `${pourcentagePv}%` }}
-            />
-          </div>
-          <p className="text-xs text-gray-400 text-center">{pvActuels}/{pvMax} PV</p>
-        </div>
-      )}
+      {/* Infos */}
+      <div className={`px-2 pb-2 ${compact ? 'pt-0.5' : 'pt-1'}`}>
+        <p className={`font-black text-white text-center truncate ${compact ? 'text-xs' : 'text-sm'}`}>
+          {pokemon.nomFr}
+        </p>
 
-      {/* Stats condensées */}
-      {afficherStats && !petit && (
-        <div className="grid grid-cols-2 gap-x-3 text-xs text-gray-400 w-full mt-1">
-          <span>⚔️ {pokemon.stats.attaque}</span>
-          <span>🛡️ {pokemon.stats.defense}</span>
-          <span>❤️ {pokemon.stats.pv}</span>
-          <span>⚡ {pokemon.stats.vitesse}</span>
+        <div className="flex gap-1 justify-center mt-1 flex-wrap">
+          {pokemon.types.map(t => <CarteType key={t} type={t} petit />)}
         </div>
-      )}
+
+        {/* Barre PV pour pokémon d'équipe */}
+        {isEquipe && (
+          <div className="mt-1.5">
+            <div className="w-full bg-black/40 rounded-full h-1.5">
+              <div className={`${couleurPv} h-1.5 rounded-full transition-all`} style={{ width: `${pctPv}%` }} />
+            </div>
+            <p className="text-center text-[10px] text-white/50 mt-0.5">{pvActuels}/{pvMax}</p>
+          </div>
+        )}
+
+        {/* Stats */}
+        {afficherStats && !compact && !isEquipe && (
+          <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-white/60">
+            <span className="flex items-center gap-1"><span className="text-orange-400">⚔</span>{pokemon.stats.attaque}</span>
+            <span className="flex items-center gap-1"><span className="text-blue-400">🛡</span>{pokemon.stats.defense}</span>
+            <span className="flex items-center gap-1"><span className="text-red-400">♥</span>{pokemon.stats.pv}</span>
+            <span className="flex items-center gap-1"><span className="text-yellow-400">⚡</span>{pokemon.stats.vitesse}</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
