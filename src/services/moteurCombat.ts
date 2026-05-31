@@ -30,8 +30,10 @@ function appliquerBonusSynergies(equipe: PokemonEquipe[]): PokemonEquipe[] {
 
 /** Calcule la vitesse effective d'un Pokémon (Serre Griffe ×1,5) */
 function vitesseEffective(pokemon: PokemonEquipe): number {
+  // Paralysie : vitesse ÷2
+  const multParalysie = pokemon.statut === 'paralysie' ? 0.5 : 1;
   const mult = pokemon.item?.id === 'quick-claw' ? 1.5 : 1;
-  return pokemon.stats.vitesse * mult;
+  return pokemon.stats.vitesse * mult * multParalysie;
 }
 
 /** PV max tenant compte des bonus de synergies */
@@ -53,6 +55,9 @@ function calculerDegats(
 
   // Pierre de Vie : +30% dégâts
   if (attaquant.item?.id === 'life-orb') base = Math.floor(base * 1.3);
+
+  // Brûlure : -25% dégâts en attaque
+  if (attaquant.statut === 'brulure') base = Math.floor(base * 0.75);
 
   // Critique : double les dégâts
   if (critique) base = Math.floor(base * 2);
@@ -110,6 +115,19 @@ function appliquerReliquesEquipe(equipe: PokemonEquipe[], reliques: DefinitionRe
   });
 }
 
+// Essaie d'appliquer un statut à un Pokémon (15% de chance)
+function tentativeStatut(
+  cible: PokemonEquipe,
+  statut: PokemonEquipe['statut'],
+): boolean {
+  if (cible.statut) return false; // déjà un statut
+  if (Math.random() < 0.15) {
+    cible.statut = statut;
+    return true;
+  }
+  return false;
+}
+
 export function resoudreCombat(
   equipeJoueur: PokemonEquipe[],
   equipeEnnemi: PokemonEquipe[],
@@ -137,12 +155,14 @@ export function resoudreCombat(
 
   // Compteur d'attaques par Pokémon (instanceId → nombre de coups portés)
   const compteurAttaques: Record<string, number> = {};
-  // Pokémon paralysés sautent leur prochain tour
+  // Pokémon paralysés sautent leur prochain tour (paralysie par capacité)
   const paralysieIds = new Set<string>();
   // Baies Sitrus consommées (usage unique)
   const sitrusConso = new Set<string>();
   // Focus Sash utilisés (usage unique)
   const sashUtilise = new Set<string>();
+  // Compteur de tours de sommeil par Pokémon
+  const toursSommeil: Record<string, number> = {};
 
   let tourMax = 60;
 
@@ -175,7 +195,24 @@ export function resoudreCombat(
       if (!jV2.length || !eV2.length) break;
     }
 
-    // ── Début de tour : effets passifs ──
+    // ── Début de tour : effets de statuts ──
+    for (const pokemon of [...joueurs.filter(p => p.pvActuels > 0), ...ennemis.filter(p => p.pvActuels > 0)]) {
+      if (pokemon.statut === 'brulure') {
+        const dmg = Math.max(1, Math.floor(pvMax(pokemon) * 0.08));
+        pokemon.pvActuels = Math.max(0, pokemon.pvActuels - dmg);
+        tours.push({
+          attaquant: 'Brûlure',
+          defenseur: pokemon.nomFr,
+          instanceIdDefenseur: pokemon.instanceId,
+          degats: dmg,
+          multiplicateur: 1,
+          pvRestantsDefenseur: pokemon.pvActuels,
+          message: `🔥 ${pokemon.nomFr} souffre de sa brûlure ! (−${dmg} PV)`,
+        });
+      }
+    }
+
+    // ── Début de tour : effets passifs (items) ──
     for (const pokemon of [...joueurs.filter(p => p.pvActuels > 0), ...ennemis.filter(p => p.pvActuels > 0)]) {
       const max = pvMax(pokemon);
 
@@ -223,7 +260,7 @@ export function resoudreCombat(
     for (const { pokemon, equipe } of combattants) {
       if (pokemon.pvActuels <= 0) continue;
 
-      // Paralysé : saute ce tour
+      // Paralysé par capacité : saute ce tour
       if (paralysieIds.has(pokemon.instanceId)) {
         paralysieIds.delete(pokemon.instanceId);
         tours.push({
@@ -233,7 +270,76 @@ export function resoudreCombat(
           degats: 0,
           multiplicateur: 1,
           pvRestantsDefenseur: pokemon.pvActuels,
-          message: `${pokemon.nomFr} est paralysé et ne peut pas attaquer !`,
+          message: `⚡ ${pokemon.nomFr} est paralysé et ne peut pas attaquer !`,
+        });
+        continue;
+      }
+
+      // Statut gel : saute le tour
+      if (pokemon.statut === 'gel') {
+        tours.push({
+          attaquant: pokemon.nomFr,
+          defenseur: pokemon.nomFr,
+          instanceIdDefenseur: pokemon.instanceId,
+          degats: 0,
+          multiplicateur: 1,
+          pvRestantsDefenseur: pokemon.pvActuels,
+          message: `🧊 ${pokemon.nomFr} est gelé et ne peut pas attaquer !`,
+        });
+        // 20% de chance de dégel
+        if (Math.random() < 0.2) {
+          pokemon.statut = undefined;
+          tours.push({
+            attaquant: pokemon.nomFr,
+            defenseur: pokemon.nomFr,
+            instanceIdDefenseur: pokemon.instanceId,
+            degats: 0,
+            multiplicateur: 1,
+            pvRestantsDefenseur: pokemon.pvActuels,
+            message: `🌡️ ${pokemon.nomFr} se dégèle !`,
+          });
+        }
+        continue;
+      }
+
+      // Statut sommeil : saute le tour, 33% de se réveiller
+      if (pokemon.statut === 'sommeil') {
+        toursSommeil[pokemon.instanceId] = (toursSommeil[pokemon.instanceId] ?? 0) + 1;
+        if (Math.random() < 0.33) {
+          pokemon.statut = undefined;
+          tours.push({
+            attaquant: pokemon.nomFr,
+            defenseur: pokemon.nomFr,
+            instanceIdDefenseur: pokemon.instanceId,
+            degats: 0,
+            multiplicateur: 1,
+            pvRestantsDefenseur: pokemon.pvActuels,
+            message: `😴 ${pokemon.nomFr} se réveille !`,
+          });
+        } else {
+          tours.push({
+            attaquant: pokemon.nomFr,
+            defenseur: pokemon.nomFr,
+            instanceIdDefenseur: pokemon.instanceId,
+            degats: 0,
+            multiplicateur: 1,
+            pvRestantsDefenseur: pokemon.pvActuels,
+            message: `💤 ${pokemon.nomFr} est endormi et ne peut pas attaquer !`,
+          });
+          continue;
+        }
+      }
+
+      // Statut paralysie : 33% de rater l'attaque
+      if (pokemon.statut === 'paralysie' && Math.random() < 0.33) {
+        tours.push({
+          attaquant: pokemon.nomFr,
+          defenseur: pokemon.nomFr,
+          instanceIdDefenseur: pokemon.instanceId,
+          degats: 0,
+          multiplicateur: 1,
+          pvRestantsDefenseur: pokemon.pvActuels,
+          message: `⚡ ${pokemon.nomFr} est paralysé et rate son attaque !`,
         });
         continue;
       }
@@ -282,12 +388,32 @@ export function resoudreCombat(
             }
             msg = `✨ ${pokemon.nomFr} utilise ${capDef.nom} ! ${degats} dégâts sur ${cible.nomFr}`;
             if (estCritique) msg += ' 💥 CRITIQUE !';
+
+            // Appliquer statuts selon type de la capacité
+            let statutApplique: string | undefined;
+            if (typeCapacite === 'fire' && tentativeStatut(cible, 'brulure')) {
+              statutApplique = 'brulure';
+              msg += ` 🔥 ${cible.nomFr} est brûlé !`;
+            } else if (typeCapacite === 'electric' && tentativeStatut(cible, 'paralysie')) {
+              statutApplique = 'paralysie';
+              msg += ` ⚡ ${cible.nomFr} est paralysé !`;
+            } else if (typeCapacite === 'ice' && tentativeStatut(cible, 'gel')) {
+              statutApplique = 'gel';
+              msg += ` 🧊 ${cible.nomFr} est gelé !`;
+            } else if (typeCapacite === 'grass' && tentativeStatut(cible, 'sommeil')) {
+              statutApplique = 'sommeil';
+              msg += ` 💤 ${cible.nomFr} s'endort !`;
+            } else if (typeCapacite === 'poison' && tentativeStatut(cible, 'poison')) {
+              statutApplique = 'poison';
+              msg += ` ☠ ${cible.nomFr} est empoisonné !`;
+            }
+
             tourCapacite = { nom: capDef.nom, description: capDef.description };
             tours.push({
               attaquant: pokemon.nomFr, defenseur: cible.nomFr,
               instanceIdDefenseur: cible.instanceId,
               degats, multiplicateur, pvRestantsDefenseur: cible.pvActuels,
-              message: msg, capacite: tourCapacite,
+              message: msg, capacite: tourCapacite, statutApplique,
             });
             // Pierre de Vie : retire 8% PV max après attaque
             if (pokemon.item?.id === 'life-orb') {
@@ -424,7 +550,7 @@ export function resoudreCombat(
         // Attaque normale — utilise un vrai mouvement si disponible
         const nomAttaque = pokemon.mouvements && pokemon.mouvements.length > 0
           ? pokemon.mouvements[Math.floor(Math.random() * pokemon.mouvements.length)]
-          : 'Attaque';
+          : pokemon.nomFr;
         const { degats: degNormal, multiplicateur } = calculerDegats(pokemon, cible, false, 1, meteo, estCritique);
         let degats = degNormal;
         // Résistance boss si l'ennemi attaque le joueur
@@ -441,16 +567,33 @@ export function resoudreCombat(
           sashUtilise.add(cible.instanceId);
           cible.pvActuels = 1;
         }
+
+        // Application de statuts sur attaque normale (chance réduite)
+        let statutApplique: string | undefined;
+        if (!cible.statut && Math.random() < 0.08) {
+          if (typeCapacite === 'fire') { cible.statut = 'brulure'; statutApplique = 'brulure'; }
+          else if (typeCapacite === 'electric') { cible.statut = 'paralysie'; statutApplique = 'paralysie'; }
+          else if (typeCapacite === 'ice') { cible.statut = 'gel'; statutApplique = 'gel'; }
+          else if (typeCapacite === 'grass') { cible.statut = 'sommeil'; statutApplique = 'sommeil'; }
+          else if (typeCapacite === 'poison') { cible.statut = 'poison'; statutApplique = 'poison'; }
+        }
+
         msg = `${pokemon.nomFr} utilise ${nomAttaque} → ${cible.nomFr} perd ${degats} PV`;
         if (estCritique) msg += ' 💥 CRITIQUE !';
         else if (multiplicateur === 2) msg += ' — C\'est super efficace !';
         else if (multiplicateur === 0.5) msg += ' — Ce n\'est pas très efficace…';
         else if (multiplicateur === 0) msg += ' — Ça n\'affecte pas !';
+        if (statutApplique === 'brulure') msg += ` 🔥 ${cible.nomFr} est brûlé !`;
+        else if (statutApplique === 'paralysie') msg += ` ⚡ ${cible.nomFr} est paralysé !`;
+        else if (statutApplique === 'gel') msg += ` 🧊 ${cible.nomFr} est gelé !`;
+        else if (statutApplique === 'sommeil') msg += ` 💤 ${cible.nomFr} s'endort !`;
+        else if (statutApplique === 'poison') msg += ` ☠ ${cible.nomFr} est empoisonné !`;
+
         tours.push({
           attaquant: pokemon.nomFr, defenseur: cible.nomFr,
           instanceIdDefenseur: cible.instanceId,
           degats, multiplicateur, pvRestantsDefenseur: cible.pvActuels,
-          message: msg,
+          message: msg, statutApplique,
         });
         // Pierre de Vie : retire 8% pvMax après attaque
         if (pokemon.item?.id === 'life-orb') {
@@ -481,21 +624,42 @@ export function resoudreCombat(
   };
 }
 
-export function genererEquipeEnnemi(cache: PokemonCache[], etage: number): PokemonEquipe[] {
+export function genererEquipeEnnemi(
+  cache: PokemonCache[],
+  etage: number,
+  combatDifficile = false,
+): PokemonEquipe[] {
   const champion = CHAMPIONS[etage];
-  let disponibles = [...cache];
+  let disponibles: PokemonCache[];
 
   if (champion) {
-    // Filtre par type spécialité du champion
+    // Boss : filtre par type spécialité du champion (priorité)
     const parType = cache.filter(p => p.types.includes(champion.typeSpecialite));
-    // Prend les 3 plus forts (BST) si assez, sinon fallback
     const tries = parType.sort((a, b) => b.bst - a.bst);
     disponibles = tries.length >= 3 ? tries : [...cache].sort((a, b) => b.bst - a.bst);
+  } else {
+    // FIX 1 — Filtre par rareté selon l'étage
+    let parRarete: PokemonCache[];
+    if (etage <= 4) {
+      parRarete = cache.filter(p => p.rarete === 1);
+    } else if (etage <= 8) {
+      parRarete = cache.filter(p => p.rarete <= 2);
+    } else if (etage <= 12) {
+      parRarete = cache.filter(p => p.rarete <= 3);
+    } else {
+      parRarete = [...cache];
+    }
+    // Fallback si moins de 3 Pokémon disponibles
+    disponibles = parRarete.length >= 3 ? parRarete : [...cache];
   }
 
   const taille = Math.min(3, 1 + Math.floor(etage / 2));
   const equipe: PokemonEquipe[] = [];
   const indices = new Set<number>();
+
+  // Multiplicateur de stats : difficile ×1.5, boss ×1.3, sinon progression normale
+  const facteurBase = champion ? 1.3 : (1 + (etage - 1) * 0.15);
+  const facteur = combatDifficile ? facteurBase * 1.5 : facteurBase;
 
   for (let i = 0; i < taille; i++) {
     if (indices.size >= disponibles.length) break;
@@ -503,7 +667,6 @@ export function genererEquipeEnnemi(cache: PokemonCache[], etage: number): Pokem
     do { idx = Math.floor(Math.random() * disponibles.length); } while (indices.has(idx));
     indices.add(idx);
     const p = disponibles[idx];
-    const facteur = champion ? 1.3 : (1 + (etage - 1) * 0.15);
     equipe.push({
       ...p,
       instanceId: `ennemi_${Math.random().toString(36).slice(2)}`,

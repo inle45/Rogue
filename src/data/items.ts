@@ -14,6 +14,13 @@ export interface ItemJeu extends DefinitionItem {
 
 export const ITEMS_DISPONIBLES: DefinitionItem[] = [
   {
+    id: 'pierre-evolution',
+    nom: 'Pierre d\'Évolution',
+    description: 'Fait évoluer un Pokémon. Nécessite que l\'évolution soit disponible.',
+    sprite: 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/fire-stone.png',
+    prix: 6,
+  },
+  {
     id: 'leftovers',
     nom: 'Restes',
     description: 'Régénère 6% des PV max à chaque tour.',

@@ -103,6 +103,16 @@ export function CartePokemon({
         <p className={`font-black text-white text-center truncate ${compact ? 'text-xs' : 'text-sm'}`}>
           {pokemon.nomFr}
         </p>
+        {!compact && pokemon.nature && pokemon.nature.statBonus && (
+          <p className="text-[9px] text-center">
+            <span className="text-green-400">↑{pokemon.nature.statBonus}</span>
+            {' '}<span className="text-red-400">↓{pokemon.nature.statMalus}</span>
+            {' '}<span className="text-white/30">{pokemon.nature.nom}</span>
+          </p>
+        )}
+        {!compact && pokemon.nature && !pokemon.nature.statBonus && (
+          <p className="text-[9px] text-white/30 text-center">{pokemon.nature.nom}</p>
+        )}
 
         <div className="flex gap-1 justify-center mt-1 flex-wrap">
           {pokemon.types.map(t => <CarteType key={t} type={t} petit />)}

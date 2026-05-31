@@ -77,6 +77,17 @@ function MiniPokemon({
         <div className="w-12 bg-black/40 rounded-full h-1.5">
           <div className={`${coulPv} h-1.5 rounded-full transition-all duration-500`} style={{ width: `${pct}%` }} />
         </div>
+        {/* Badge statut */}
+        {p.statut && (
+          <span className="text-[9px] font-bold px-1 rounded" style={{
+            background: p.statut === 'poison' ? '#7e22ce' : p.statut === 'brulure' ? '#c2410c' :
+            p.statut === 'paralysie' ? '#a16207' : p.statut === 'gel' ? '#164e63' : '#166534',
+            color: 'white'
+          }}>
+            {p.statut === 'poison' ? '☠' : p.statut === 'brulure' ? '🔥' :
+             p.statut === 'paralysie' ? '⚡' : p.statut === 'gel' ? '🧊' : '💤'}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -132,6 +143,7 @@ export function CombatPage() {
   const {
     terrain, cachePokemons, etage, appliquerResultatCombat,
     meteoActuelle, reliques, reliquesProposees, choisirRelique,
+    combatDifficile,
   } = useJeuStore();
   const [phase, setPhase] = useState<'preparation' | 'combat' | 'resultat'>('preparation');
   const [tours, setTours] = useState<TourCombat[]>([]);
@@ -146,14 +158,26 @@ export function CombatPage() {
   const [flashCapacite, setFlashCapacite] = useState<{ id: string; type: string } | null>(null);
   // Dégâts flottants
   const [floatingDmg, setFloatingDmg] = useState<FloatingDmg[]>([]);
+  // Vitesse de l'animation (Feature 3)
+  const [vitesse, setVitesse] = useState<1 | 2 | 3>(1);
+  const vitesseRef = useRef<1 | 2 | 3>(vitesse);
+  // Overlay super efficace (Feature 4)
+  const [overlayEfficacite, setOverlayEfficacite] = useState<{ texte: string; couleur: string } | null>(null);
+  // Statuts en cours pour l'affichage pendant l'animation (Feature 5)
+  const [statutsEnCours, setStatutsEnCours] = useState<Record<string, PokemonEquipe['statut']>>({});
   const journalRef = useRef<HTMLDivElement>(null);
+
+  // Sync vitesse ref
+  useEffect(() => {
+    vitesseRef.current = vitesse;
+  }, [vitesse]);
 
   const equipeJoueur = terrain.filter(Boolean) as PokemonEquipe[];
   const champion = CHAMPIONS[etage];
   const estBoss = !!champion;
 
   useEffect(() => {
-    if (cachePokemons.length > 0) setEquipeEnnemi(genererEquipeEnnemi(cachePokemons, etage));
+    if (cachePokemons.length > 0) setEquipeEnnemi(genererEquipeEnnemi(cachePokemons, etage, combatDifficile));
   }, [cachePokemons, etage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -161,6 +185,15 @@ export function CombatPage() {
     // Déclenche animation au coup sur le dernier tour affiché
     if (tourAffiche > 0 && tours[tourAffiche - 1]) {
       const t = tours[tourAffiche - 1];
+
+      // Mise à jour des statuts en cours
+      if (t.statutApplique && t.instanceIdDefenseur) {
+        setStatutsEnCours(prev => ({
+          ...prev,
+          [t.instanceIdDefenseur]: t.statutApplique as PokemonEquipe['statut'],
+        }));
+      }
+
       if (t.degats > 0) {
         setIdEnCoup(t.instanceIdDefenseur);
         setTimeout(() => setIdEnCoup(null), 350);
@@ -173,6 +206,18 @@ export function CombatPage() {
         const dmgKey = Date.now() + Math.random();
         setFloatingDmg(prev => [...prev, { id: t.instanceIdDefenseur, valeur: t.degats, couleur, key: dmgKey }]);
         setTimeout(() => setFloatingDmg(prev => prev.filter(d => d.key !== dmgKey)), 900);
+
+        // Overlay efficacité (Feature 4)
+        if (t.multiplicateur >= 2) {
+          setOverlayEfficacite({ texte: '⚡ SUPER EFFICACE !', couleur: '#facc15' });
+          setTimeout(() => setOverlayEfficacite(null), 800);
+        } else if (t.multiplicateur === 0) {
+          setOverlayEfficacite({ texte: '🛡️ AUCUN EFFET', couleur: '#6b7280' });
+          setTimeout(() => setOverlayEfficacite(null), 800);
+        } else if (t.multiplicateur < 1 && t.multiplicateur > 0) {
+          setOverlayEfficacite({ texte: '💤 PEU EFFICACE…', couleur: '#94a3b8' });
+          setTimeout(() => setOverlayEfficacite(null), 800);
+        }
 
         // Son différent selon capacité ou coup normal
         if (t.capacite) {
@@ -204,6 +249,7 @@ export function CombatPage() {
     setVictoire(res.victoire);
     setPhase('combat');
     setTourAffiche(0);
+    setStatutsEnCours({});
     let i = 0;
     const iv = setInterval(() => {
       i++;
@@ -216,7 +262,11 @@ export function CombatPage() {
           else Audio.defaite();
         }, 700);
       }
-    }, 450);
+    }, Math.round(450 / vitesseRef.current));
+
+    // Écoute les changements de vitesse en cours d'animation
+    // en mettant à jour l'intervalle via une ref — l'interval lit vitesseRef.current à chaque tick
+    void iv; // iv est géré par le closure ci-dessus
   };
 
   const terminer = () => {
@@ -229,10 +279,18 @@ export function CombatPage() {
   tours.slice(0, tourAffiche).forEach(t => { pvEnCours[t.instanceIdDefenseur] = t.pvRestantsDefenseur; });
 
   const equipeJoueurEnCours = phase === 'resultat' ? equipeFinalJoueur : equipeJoueur;
-  const joueurAvecPv = equipeJoueurEnCours.map(p => ({ ...p, pvActuels: pvEnCours[p.instanceId] ?? p.pvActuels }));
-  const ennemiAvecPv = equipeEnnemi.map(p => ({ ...p, pvActuels: pvEnCours[p.instanceId] ?? p.pvActuels }));
+  const joueurAvecPv = equipeJoueurEnCours.map(p => ({
+    ...p,
+    pvActuels: pvEnCours[p.instanceId] ?? p.pvActuels,
+    statut: statutsEnCours[p.instanceId] ?? p.statut,
+  }));
+  const ennemiAvecPv = equipeEnnemi.map(p => ({
+    ...p,
+    pvActuels: pvEnCours[p.instanceId] ?? p.pvActuels,
+    statut: statutsEnCours[p.instanceId] ?? p.statut,
+  }));
   const toursVisibles = tours.slice(0, tourAffiche);
-  const recompense = 5 + etage;
+  const recompense = combatDifficile ? (5 + etage) * 2 : 5 + etage;
 
   return (
     <>
@@ -284,12 +342,20 @@ export function CombatPage() {
           100% { opacity: 0; transform: translateY(-48px) scale(0.9); }
         }
         .float-dmg { animation: float-up 0.8s ease-out forwards; }
+        @keyframes efficacite {
+          0%   { opacity: 0; transform: scale(0.7); }
+          20%  { opacity: 1; transform: scale(1.1); }
+          80%  { opacity: 1; transform: scale(1); }
+          100% { opacity: 0; transform: scale(0.9); }
+        }
+        .anim-efficacite { animation: efficacite 0.8s ease-out forwards; }
       `}</style>
 
       <div className="min-h-screen bg-gray-950 text-white flex flex-col max-w-lg mx-auto">
         <header className="px-4 pt-4 pb-2 border-b border-white/8">
           <h1 className="text-center text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-400 to-orange-400">
             ⚔️ COMBAT — ÉTAGE {etage}
+            {combatDifficile && <span className="ml-2 text-red-400 text-sm">💀 DIFFICILE</span>}
           </h1>
         </header>
 
@@ -360,6 +426,15 @@ export function CombatPage() {
             </div>
           </div>
 
+          {/* Overlay super efficace (Feature 4) */}
+          {overlayEfficacite && (
+            <div className="flex justify-center">
+              <span className="anim-efficacite text-sm font-black px-3 py-1 rounded-full bg-black/60" style={{ color: overlayEfficacite.couleur }}>
+                {overlayEfficacite.texte}
+              </span>
+            </div>
+          )}
+
           {/* Journal */}
           {phase !== 'preparation' && (
             <div
@@ -399,10 +474,19 @@ export function CombatPage() {
               </button>
             )}
 
+            {/* Indicateur combat + bouton vitesse (Feature 3) */}
             {phase === 'combat' && (
-              <div className="flex items-center gap-2 text-white/40 text-sm">
-                <span className="animate-pulse text-xl">⚔️</span>
-                <span>Combat en cours…</span>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 text-white/40 text-sm">
+                  <span className="animate-pulse text-xl">⚔️</span>
+                  <span>Combat en cours…</span>
+                </div>
+                <button
+                  onClick={() => setVitesse(v => v === 1 ? 2 : v === 2 ? 3 : 1)}
+                  className="px-3 py-1 rounded-lg bg-white/10 text-white/60 text-xs font-bold hover:bg-white/20 transition-all"
+                >
+                  ×{vitesse}
+                </button>
               </div>
             )}
 

@@ -44,4 +44,6 @@ export interface TourCombat {
   // présent si une capacité spéciale s'est déclenchée ce tour
   capacite?: { nom: string; description: string; cibleAoe?: boolean };
   meteo?: TypeMeteo;
+  // statut appliqué ce tour (pour le log)
+  statutApplique?: string;
 }

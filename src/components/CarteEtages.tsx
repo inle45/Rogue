@@ -7,6 +7,7 @@ const ICONE: Record<TypeEtage, string> = {
   repos:         '💚',
   boutique_bonus:'🏪',
   boss:          '💀',
+  evenement:     '🎲',
 };
 
 const COULEUR_ETAGE: Record<TypeEtage, string> = {
@@ -14,6 +15,7 @@ const COULEUR_ETAGE: Record<TypeEtage, string> = {
   repos:          'border-green-800/60 text-green-400',
   boutique_bonus: 'border-purple-800/60 text-purple-400',
   boss:           'border-red-800/60 text-red-400',
+  evenement:      'border-purple-700/60 text-purple-300',
 };
 
 interface Props {

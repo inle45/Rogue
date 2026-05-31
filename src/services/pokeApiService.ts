@@ -1,6 +1,7 @@
 // Service de fetch et mise en cache des données PokeAPI
 
 import type { PokemonCache, StatsPokemon } from '../types/pokemon';
+import { nomAttaqueFr } from '../data/nomsAttaques';
 
 // Traductions françaises des noms de types
 const TYPES_FR: Record<string, string> = {
@@ -92,11 +93,8 @@ async function fetchPokemon(id: number): Promise<PokemonCache> {
   const { stats, bst } = extraireStats(data);
   const rarete = calculerRarete(bst);
 
-  const mouvements = (data.moves ?? []).slice(-4).map((m: { move: { name: string } }) =>
-    m.move.name.replace(/-/g, ' ')
-      .split(' ')
-      .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(' ')
+  const mouvements = (data.moves ?? []).slice(-6).slice(-4).map((m: { move: { name: string } }) =>
+    nomAttaqueFr(m.move.name)
   );
 
   return {
@@ -112,7 +110,7 @@ async function fetchPokemon(id: number): Promise<PokemonCache> {
   };
 }
 
-const CLE_CACHE_LOCAL = 'pokedraft_cache_v3';
+const CLE_CACHE_LOCAL = 'pokedraft_cache_v4';
 
 export async function chargerCachePokemons(
   onProgression?: (loaded: number, total: number) => void

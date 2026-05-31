@@ -20,6 +20,7 @@ function compterTypeEquipe(equipe: (PokemonEquipe | null)[], type: string): numb
 
 export function DraftPage() {
   const [onglet, setOnglet] = useState<Onglet>('boutique');
+  const [combatChoixFait, setCombatChoixFait] = useState(false);
 
   const {
     pokedollars, pvJoueur, pvJoueurMax, etage, meilleurEtage,
@@ -27,6 +28,7 @@ export function DraftPage() {
     boutiqueItems, itemEnAttente, reliques,
     acheterPokemon, refreshBoutique, lancerCombat, fuir,
     acheterItem, equiperItemSurPokemon,
+    utiliserCentreRepas, choisirEvenement, combatDifficile,
   } = useJeuStore();
 
   const nbTerrain = terrain.filter(Boolean).length;
@@ -35,6 +37,10 @@ export function DraftPage() {
   const peutCombattre = nbTerrain > 0;
   const pctPv = (pvJoueur / pvJoueurMax) * 100;
   const couleurPv = pctPv > 50 ? 'bg-green-400' : pctPv > 25 ? 'bg-yellow-400' : 'bg-red-500';
+
+  const typeEtageActuel = carteEtages[etage - 1];
+  const estEtageEvenement = typeEtageActuel === 'evenement';
+  const estEtageRepos = typeEtageActuel === 'repos';
 
   const handleAcheterPokemon = (p: Parameters<typeof acheterPokemon>[0]) => {
     acheterPokemon(p);
@@ -51,6 +57,11 @@ export function DraftPage() {
       equiperItemSurPokemon(instanceId);
       Audio.achat();
     }
+  };
+
+  const handleChoisirEvenement = (type: 'difficile' | 'normal') => {
+    choisirEvenement(type);
+    setCombatChoixFait(true);
   };
 
   return (
@@ -120,6 +131,21 @@ export function DraftPage() {
         {/* ── BOUTIQUE ── */}
         {onglet === 'boutique' && (
           <div className="p-4 flex flex-col gap-5">
+
+            {/* Centre Pokémon (Feature 6) */}
+            {estEtageRepos && (
+              <div className="rounded-2xl border border-green-700/50 bg-green-950/20 p-4 flex flex-col items-center gap-3">
+                <span className="text-4xl">🏥</span>
+                <h2 className="text-lg font-black text-green-400">Centre Pokémon</h2>
+                <p className="text-white/50 text-sm text-center">Soignez toute votre équipe + 30% de vos PV</p>
+                <button
+                  onClick={() => { utiliserCentreRepas(); Audio.achat(); }}
+                  className="w-full py-3 rounded-xl font-black text-sm bg-gradient-to-r from-green-700 to-emerald-600 hover:from-green-600 hover:to-emerald-500 transition-all"
+                >
+                  🌿 SE SOIGNER (Gratuit)
+                </button>
+              </div>
+            )}
 
             {/* Pokémon */}
             <div>
@@ -261,6 +287,46 @@ export function DraftPage() {
         {/* ── COMBAT ── */}
         {onglet === 'combat' && (
           <div className="p-4 flex flex-col items-center gap-6 pt-8">
+
+            {/* Écran de choix d'événement (Feature 7) */}
+            {estEtageEvenement && !combatChoixFait && !combatDifficile && (
+              <div className="w-full rounded-2xl border border-purple-700/50 bg-purple-950/20 p-4 flex flex-col gap-4">
+                <div className="text-center">
+                  <span className="text-4xl">🎲</span>
+                  <h2 className="text-lg font-black text-purple-400 mt-1">Étage Événement</h2>
+                  <p className="text-white/50 text-sm">Choisissez votre défi</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => handleChoisirEvenement('normal')}
+                    className="rounded-xl border border-white/20 bg-white/5 p-3 flex flex-col items-center gap-1 hover:bg-white/10 transition-all"
+                  >
+                    <span className="text-2xl">⚔️</span>
+                    <p className="text-white font-bold text-sm">Normal</p>
+                    <p className="text-white/40 text-xs">Récompense standard</p>
+                  </button>
+                  <button
+                    onClick={() => handleChoisirEvenement('difficile')}
+                    className="rounded-xl border border-red-700/40 bg-red-950/20 p-3 flex flex-col items-center gap-1 hover:bg-red-900/30 transition-all"
+                  >
+                    <span className="text-2xl">💀</span>
+                    <p className="text-red-400 font-bold text-sm">Difficile</p>
+                    <p className="text-white/40 text-xs">Ennemis ×1.5 — Récompense ×2</p>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Affiche le choix fait */}
+            {estEtageEvenement && (combatChoixFait || combatDifficile) && (
+              <div className={`w-full rounded-xl border p-3 flex items-center gap-2 ${combatDifficile ? 'border-red-700/40 bg-red-950/20' : 'border-white/10 bg-white/5'}`}>
+                <span className="text-xl">{combatDifficile ? '💀' : '⚔️'}</span>
+                <p className={`text-sm font-bold ${combatDifficile ? 'text-red-400' : 'text-white/70'}`}>
+                  {combatDifficile ? 'Mode difficile — Ennemis ×1.5 — Récompense ×2' : 'Mode normal sélectionné'}
+                </p>
+              </div>
+            )}
+
             <div className="text-center">
               <p className="text-5xl mb-3">⚔️</p>
               <h2 className="text-2xl font-black text-white">Prêt au combat ?</h2>
@@ -277,16 +343,19 @@ export function DraftPage() {
               <p className="text-white/30 text-sm text-center">Aucun Pokémon sur le terrain.</p>
             )}
 
-            <button
-              onClick={() => { if (peutCombattre) { lancerCombat(); Audio.clic(); } }}
-              disabled={!peutCombattre}
-              className={`w-full py-5 rounded-2xl font-black text-xl tracking-widest transition-all shadow-xl
-                ${peutCombattre
-                  ? 'bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-500 hover:to-orange-400 shadow-red-900/40 active:scale-95'
-                  : 'bg-gray-800 text-white/30 cursor-not-allowed'}`}
-            >
-              ⚔️ COMBATTRE
-            </button>
+            {/* Masque le bouton de combat pour les événements tant que le choix n'est pas fait */}
+            {(!estEtageEvenement || combatChoixFait || combatDifficile) && (
+              <button
+                onClick={() => { if (peutCombattre) { lancerCombat(); Audio.clic(); } }}
+                disabled={!peutCombattre}
+                className={`w-full py-5 rounded-2xl font-black text-xl tracking-widest transition-all shadow-xl
+                  ${peutCombattre
+                    ? 'bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-500 hover:to-orange-400 shadow-red-900/40 active:scale-95'
+                    : 'bg-gray-800 text-white/30 cursor-not-allowed'}`}
+              >
+                ⚔️ COMBATTRE
+              </button>
+            )}
 
             <button
               onClick={() => { fuir(); Audio.defaite(); }}

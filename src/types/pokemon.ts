@@ -18,6 +18,7 @@ export interface PokemonCache {
   rarete: 1 | 2 | 3 | 4;
   shiny?: boolean;
   mouvements?: string[];
+  nature?: import('../data/natures').Nature;
 }
 
 export interface PokemonEquipe extends PokemonCache {
@@ -28,6 +29,7 @@ export interface PokemonEquipe extends PokemonCache {
   bonusPv: number;
   item?: import('../data/items').ItemJeu;
   itemConsomme?: boolean;
+  statut?: 'poison' | 'brulure' | 'paralysie' | 'sommeil' | 'gel';
 }
 
 export interface PokemonBoutique extends PokemonCache {

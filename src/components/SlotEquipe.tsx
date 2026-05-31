@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import type { PokemonEquipe } from '../types/pokemon';
 import { CartePokemon } from './CartePokemon';
 import { useJeuStore } from '../store/jeuStore';
+import { TABLE_EVOLUTIONS } from '../data/evolutions';
 
 interface Props {
   pokemon: PokemonEquipe | null;
@@ -60,6 +61,12 @@ export function SlotEquipe({ pokemon, index, type }: Props) {
           {pokemon.shiny && (
             <div className="absolute top-1.5 left-1.5 z-10 text-base leading-none" title="Pokémon Shiny">
               ✨
+            </div>
+          )}
+          {/* Badge évolution disponible */}
+          {TABLE_EVOLUTIONS[pokemon.id] !== undefined && (
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 bg-blue-900/80 border border-blue-500/60 rounded-lg px-1.5 py-0.5 text-[8px] font-black text-blue-300 leading-none whitespace-nowrap">
+              → évol
             </div>
           )}
           {/* Bouton vente — visible au survol */}

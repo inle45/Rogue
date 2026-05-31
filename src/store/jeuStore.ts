@@ -10,6 +10,8 @@ import { tirerMeteoAleatoire } from '../data/meteo';
 import type { TypeMeteo } from '../data/meteo';
 import { tirerReliquesAleatoires } from '../data/reliques';
 import type { DefinitionRelique } from '../data/reliques';
+import { tirerNatureAleatoire, appliquerNature } from '../data/natures';
+import { TABLE_EVOLUTIONS } from '../data/evolutions';
 
 // Prix selon rareté : ★1=₽2, ★2=₽3, ★3=₽5, ★4=₽9
 const PRIX_PAR_RARETE: Record<1 | 2 | 3 | 4, number> = { 1: 2, 2: 3, 3: 5, 4: 9 };
@@ -19,17 +21,19 @@ const CLE_MEILLEUR_ETAGE = 'pokedraft_meilleur_etage';
 const NB_ETAGES_TOTAL = 15;
 const NB_ITEMS_BOUTIQUE = 3;
 
-export type TypeEtage = 'combat' | 'repos' | 'boutique_bonus' | 'boss';
+export type TypeEtage = 'combat' | 'repos' | 'boutique_bonus' | 'boss' | 'evenement';
 
-/** Génère la carte des 15 étages : 5/10/15 = boss, autres = 65% combat / 20% repos / 15% boutique_bonus */
+/** Génère la carte des 15 étages : 5/10/15 = boss, étages 1-2 = combat, autres = 55% combat / 15% repos / 15% boutique_bonus / 15% evenement */
 function genererCarteEtages(): TypeEtage[] {
   return Array.from({ length: NB_ETAGES_TOTAL }, (_, i) => {
     const num = i + 1;
     if (num === 5 || num === 10 || num === 15) return 'boss';
+    if (num <= 2) return 'combat'; // Premiers étages toujours combat
     const r = Math.random();
-    if (r < 0.65) return 'combat';
-    if (r < 0.85) return 'repos';
-    return 'boutique_bonus';
+    if (r < 0.55) return 'combat';
+    if (r < 0.70) return 'repos';
+    if (r < 0.85) return 'boutique_bonus';
+    return 'evenement';
   });
 }
 
@@ -88,7 +92,10 @@ function tirerBoutique(cache: PokemonCache[], exclude: string[] = [], etage?: nu
       const base = disponibles[idx];
       // Shiny : 5% de chance
       const shiny = Math.random() < 0.05;
-      const pokemon = { ...base, shiny };
+      // Nature aléatoire
+      const nature = tirerNatureAleatoire();
+      const statsAvecNature = appliquerNature(base.stats, nature);
+      const pokemon = { ...base, shiny, nature, stats: statsAvecNature };
       if (shiny) pokemon.sprite = pokemon.sprite.replace('/pokemon/', '/pokemon/shiny/');
       selection.push({ ...pokemon, prix: PRIX_PAR_RARETE[pokemon.rarete], achete: false });
     }
@@ -111,6 +118,9 @@ interface ActionsJeu {
   acheterItem: (item: ItemJeu) => void;
   equiperItemSurPokemon: (instanceId: string) => void;
   choisirRelique: (id: string) => void;
+  utiliserCentreRepas: () => void;
+  choisirEvenement: (type: 'difficile' | 'normal') => void;
+  evoluerPokemon: (instanceId: string) => void;
 }
 
 interface StoreJeu extends EtatJeu, ActionsJeu {
@@ -123,6 +133,7 @@ interface StoreJeu extends EtatJeu, ActionsJeu {
   meteoActuelle: TypeMeteo;
   reliques: DefinitionRelique[];
   reliquesProposees: DefinitionRelique[];
+  combatDifficile: boolean;
 }
 
 export const useJeuStore = create<StoreJeu>((set, get) => ({
@@ -145,6 +156,7 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
   meteoActuelle: 'neutre' as TypeMeteo,
   reliques: [],
   reliquesProposees: [],
+  combatDifficile: false,
 
   initialiserCache: (cache) => {
     const etage = 1;
@@ -265,16 +277,16 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
   },
 
   appliquerResultatCombat: (degatsJoueur, victoire) => {
-    const { pvJoueur, pvJoueurMax, terrain, banc, etage, pokedollars, cachePokemons, reliques } = get();
+    const { pvJoueur, pvJoueurMax, terrain, banc, etage, pokedollars, cachePokemons, reliques, combatDifficile } = get();
     let nouveauxPv = Math.max(0, pvJoueur - degatsJoueur);
 
     if (nouveauxPv <= 0) {
-      set({ pvJoueur: 0, phase: 'defaite' });
+      set({ pvJoueur: 0, phase: 'defaite', combatDifficile: false });
       return;
     }
 
     if (!victoire) {
-      set({ pvJoueur: nouveauxPv, phase: 'defaite' });
+      set({ pvJoueur: nouveauxPv, phase: 'defaite', combatDifficile: false });
       return;
     }
 
@@ -292,6 +304,9 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
     }
 
     let recompense = 5 + etage;
+
+    // Récompense doublée si combat difficile
+    if (combatDifficile) recompense *= 2;
 
     // Relique pokedollars_bonus
     const reliqueDollars = reliques.find(r => r.effet === 'pokedollars_bonus');
@@ -323,6 +338,7 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
       boutiqueItems: genererItemsAleatoires(nbItems),
       coutRefresh: COUT_REFRESH_BASE,
       reliquesProposees,
+      combatDifficile: false,
     });
   },
 
@@ -339,7 +355,7 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
       pokedollars: pokedollars + recompense,
       boutique,
       boutiqueItems,
-      coutRefresh: COUT_REFRESH_BASE, // Réinitialise le coût de refresh à chaque étage
+      coutRefresh: COUT_REFRESH_BASE,
       phase: 'draft',
     });
   },
@@ -382,6 +398,13 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
     const { itemEnAttente, terrain, banc } = get();
     if (!itemEnAttente) return;
 
+    // Pierre d'Évolution : déclenche l'évolution
+    if (itemEnAttente.id === 'pierre-evolution') {
+      set({ itemEnAttente: null });
+      get().evoluerPokemon(instanceId);
+      return;
+    }
+
     const equiperSurSlots = (slots: (PokemonEquipe | null)[]) =>
       slots.map(p => {
         if (p?.instanceId !== instanceId) return p;
@@ -403,5 +426,60 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
       reliques: [...reliques, relique],
       reliquesProposees: [],
     });
+  },
+
+  utiliserCentreRepas: () => {
+    const { pvJoueur, pvJoueurMax, terrain, banc } = get();
+    const soigner = (p: PokemonEquipe | null): PokemonEquipe | null => {
+      if (!p) return null;
+      const pvMaxP = p.stats.pv + p.bonusPv;
+      return { ...p, pvActuels: pvMaxP, statut: undefined };
+    };
+    set({
+      pvJoueur: Math.min(pvJoueurMax, pvJoueur + Math.floor(pvJoueurMax * 0.3)),
+      terrain: terrain.map(soigner) as typeof terrain,
+      banc: banc.map(soigner) as typeof banc,
+    });
+  },
+
+  choisirEvenement: (type: 'difficile' | 'normal') => {
+    set({ combatDifficile: type === 'difficile' });
+  },
+
+  evoluerPokemon: (instanceId: string) => {
+    const { terrain, banc, cachePokemons } = get();
+    const trouver = (slots: (PokemonEquipe | null)[]) => slots.find(p => p?.instanceId === instanceId);
+    const pokemon = trouver(terrain) ?? trouver(banc);
+    if (!pokemon) return;
+
+    const evolutionId = TABLE_EVOLUTIONS[pokemon.id];
+    if (!evolutionId) return;
+
+    const formeEvoluee = cachePokemons.find(p => p.id === evolutionId);
+    if (!formeEvoluee) return; // Pas en cache
+
+    const nouvelleForme: PokemonEquipe = {
+      ...formeEvoluee,
+      instanceId: pokemon.instanceId, // Garde le même ID
+      pvActuels: Math.min(
+        formeEvoluee.stats.pv,
+        pokemon.pvActuels + (formeEvoluee.stats.pv - pokemon.stats.pv)
+      ),
+      bonusAttaque: pokemon.bonusAttaque,
+      bonusDefense: pokemon.bonusDefense,
+      bonusPv: pokemon.bonusPv,
+      item: pokemon.item,
+      itemConsomme: pokemon.itemConsomme,
+      nature: pokemon.nature,
+      shiny: pokemon.shiny,
+    };
+
+    const remplacer = (slots: (PokemonEquipe | null)[]) =>
+      slots.map(p => p?.instanceId === instanceId ? nouvelleForme : p);
+
+    const nouveauTerrain = remplacer(terrain) as typeof terrain;
+    const nouveauBanc = remplacer(banc) as typeof banc;
+    const synergiesActives = calculerSynergies(nouveauTerrain);
+    set({ terrain: nouveauTerrain, banc: nouveauBanc, synergiesActives });
   },
 }));
