@@ -4,6 +4,8 @@ import { resoudreCombat, genererEquipeEnnemi } from '../services/moteurCombat';
 import type { TourCombat } from '../types/jeu';
 import type { PokemonEquipe } from '../types/pokemon';
 import { Audio } from '../services/audioService';
+import { METEOS } from '../data/meteo';
+import { CHAMPIONS } from '../data/champions';
 
 // Couleur de flash par type pour les animations de capacité
 const FLASH_TYPE: Record<string, string> = {
@@ -14,47 +16,67 @@ const FLASH_TYPE: Record<string, string> = {
   ghost: 'hue-rotate-270 saturate-150', dark: 'brightness-50',
 };
 
+interface FloatingDmg {
+  id: string;
+  valeur: number;
+  couleur: string;
+  key: number;
+}
+
 // Pokémon miniature avec animation au coup et flash de capacité
 function MiniPokemon({
-  p, mort, enCoup, recoitSoin, flashCapacite,
+  p, mort, enCoup, recoitSoin, flashCapacite, floatingDmg,
 }: {
   p: PokemonEquipe; mort?: boolean; enCoup?: boolean; recoitSoin?: boolean; flashCapacite?: string;
+  floatingDmg?: FloatingDmg[];
 }) {
   const pct = p.pvActuels / Math.max(1, p.stats.pv + p.bonusPv) * 100;
   const coulPv = pct > 50 ? 'bg-green-400' : pct > 25 ? 'bg-yellow-400' : 'bg-red-500';
 
   return (
-    <div
-      className={`
-        flex flex-col items-center gap-0.5 transition-all duration-200
-        ${mort ? 'opacity-25 grayscale' : ''}
-      `}
-      style={enCoup ? { animation: 'shake 0.3s ease-in-out' } : undefined}
-    >
-      <div className="relative">
-        {/* Halo de capacité */}
-        {flashCapacite && (
-          <div className="absolute inset-0 rounded-full animate-ping opacity-60"
-            style={{ background: flashCapacite }} />
-        )}
-        <img
-          src={p.sprite}
-          alt={p.nomFr}
-          className={`w-14 h-14 object-contain transition-all duration-150
-            ${enCoup ? 'brightness-200' : ''}
-            ${recoitSoin ? 'brightness-150 hue-rotate-90 saturate-200' : ''}
-            ${flashCapacite ? (FLASH_TYPE[p.types[0]] ?? '') : ''}
-          `}
-        />
-        {/* Badge item équipé */}
-        {p.item && (
-          <img src={p.item.sprite} alt={p.item.nom}
-            className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-gray-900 border border-white/20 p-0.5" />
-        )}
-      </div>
-      <p className="text-[10px] text-white/70 font-bold truncate max-w-[60px] text-center">{p.nomFr}</p>
-      <div className="w-12 bg-black/40 rounded-full h-1.5">
-        <div className={`${coulPv} h-1.5 rounded-full transition-all duration-500`} style={{ width: `${pct}%` }} />
+    <div className="relative">
+      {/* Dégâts flottants */}
+      {floatingDmg?.filter(d => d.id === p.instanceId).map(d => (
+        <div
+          key={d.key}
+          className="float-dmg absolute -top-2 left-1/2 -translate-x-1/2 text-sm font-black pointer-events-none z-10 drop-shadow-lg"
+          style={{ color: d.couleur }}
+        >
+          -{d.valeur}
+        </div>
+      ))}
+      <div
+        className={`
+          flex flex-col items-center gap-0.5 transition-all duration-200
+          ${mort ? 'opacity-25 grayscale' : ''}
+        `}
+        style={enCoup ? { animation: 'shake 0.3s ease-in-out' } : undefined}
+      >
+        <div className="relative">
+          {/* Halo de capacité */}
+          {flashCapacite && (
+            <div className="absolute inset-0 rounded-full animate-ping opacity-60"
+              style={{ background: flashCapacite }} />
+          )}
+          <img
+            src={p.sprite}
+            alt={p.nomFr}
+            className={`w-14 h-14 object-contain transition-all duration-150
+              ${enCoup ? 'brightness-200' : ''}
+              ${recoitSoin ? 'brightness-150 hue-rotate-90 saturate-200' : ''}
+              ${flashCapacite ? (FLASH_TYPE[p.types[0]] ?? '') : ''}
+            `}
+          />
+          {/* Badge item équipé */}
+          {p.item && (
+            <img src={p.item.sprite} alt={p.item.nom}
+              className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-gray-900 border border-white/20 p-0.5" />
+          )}
+        </div>
+        <p className="text-[10px] text-white/70 font-bold truncate max-w-[60px] text-center">{p.nomFr}</p>
+        <div className="w-12 bg-black/40 rounded-full h-1.5">
+          <div className={`${coulPv} h-1.5 rounded-full transition-all duration-500`} style={{ width: `${pct}%` }} />
+        </div>
       </div>
     </div>
   );
@@ -107,7 +129,10 @@ const HALO_COULEUR: Record<string, string> = {
 };
 
 export function CombatPage() {
-  const { terrain, cachePokemons, etage, appliquerResultatCombat } = useJeuStore();
+  const {
+    terrain, cachePokemons, etage, appliquerResultatCombat,
+    meteoActuelle, reliques, reliquesProposees, choisirRelique,
+  } = useJeuStore();
   const [phase, setPhase] = useState<'preparation' | 'combat' | 'resultat'>('preparation');
   const [tours, setTours] = useState<TourCombat[]>([]);
   const [tourAffiche, setTourAffiche] = useState(0);
@@ -119,9 +144,13 @@ export function CombatPage() {
   const [afficherVictoire, setAfficherVictoire] = useState(false);
   // instanceId + type du Pokémon qui vient de déclencher une capacité
   const [flashCapacite, setFlashCapacite] = useState<{ id: string; type: string } | null>(null);
+  // Dégâts flottants
+  const [floatingDmg, setFloatingDmg] = useState<FloatingDmg[]>([]);
   const journalRef = useRef<HTMLDivElement>(null);
 
   const equipeJoueur = terrain.filter(Boolean) as PokemonEquipe[];
+  const champion = CHAMPIONS[etage];
+  const estBoss = !!champion;
 
   useEffect(() => {
     if (cachePokemons.length > 0) setEquipeEnnemi(genererEquipeEnnemi(cachePokemons, etage));
@@ -135,6 +164,16 @@ export function CombatPage() {
       if (t.degats > 0) {
         setIdEnCoup(t.instanceIdDefenseur);
         setTimeout(() => setIdEnCoup(null), 350);
+
+        // Dégâts flottants
+        const couleur = t.multiplicateur >= 2 ? '#facc15'
+          : t.multiplicateur === 0 ? '#6b7280'
+          : t.multiplicateur < 1 ? '#94a3b8'
+          : '#f87171';
+        const dmgKey = Date.now() + Math.random();
+        setFloatingDmg(prev => [...prev, { id: t.instanceIdDefenseur, valeur: t.degats, couleur, key: dmgKey }]);
+        setTimeout(() => setFloatingDmg(prev => prev.filter(d => d.key !== dmgKey)), 900);
+
         // Son différent selon capacité ou coup normal
         if (t.capacite) {
           // Trouve le type de l'attaquant pour le flash
@@ -155,11 +194,11 @@ export function CombatPage() {
         setTimeout(() => setIdsEnSoin([]), 500);
       }
     }
-  }, [tourAffiche]);
+  }, [tourAffiche]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const lancerAnimation = () => {
     if (!equipeEnnemi.length) return;
-    const res = resoudreCombat(equipeJoueur, equipeEnnemi);
+    const res = resoudreCombat(equipeJoueur, equipeEnnemi, meteoActuelle, reliques, estBoss);
     setTours(res.tours);
     setEquipeFinalJoueur(res.equipeFinalJoueur);
     setVictoire(res.victoire);
@@ -202,6 +241,29 @@ export function CombatPage() {
         <EcranVictoire etage={etage} recompense={recompense} onContinuer={terminer} />
       )}
 
+      {/* Modal choix de relique */}
+      {!afficherVictoire && reliquesProposees.length > 0 && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-gray-950/95 backdrop-blur gap-6 p-4">
+          <h2 className="text-2xl font-black text-yellow-400">✨ Choisissez une Relique</h2>
+          <p className="text-white/50 text-sm">Bonus permanent pour le reste du run</p>
+          <div className="flex flex-col gap-3 w-full max-w-sm">
+            {reliquesProposees.map(r => (
+              <button
+                key={r.id}
+                onClick={() => { choisirRelique(r.id); Audio.achat(); }}
+                className="rounded-2xl border border-yellow-600/40 bg-yellow-900/20 p-4 flex items-center gap-3 hover:bg-yellow-800/30 transition-all active:scale-95"
+              >
+                <span className="text-3xl">{r.icone}</span>
+                <div className="text-left">
+                  <p className="text-yellow-300 font-black">{r.nom}</p>
+                  <p className="text-white/60 text-xs">{r.description}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Keyframes shake dans le head via style tag */}
       <style>{`
         @keyframes shake {
@@ -216,6 +278,12 @@ export function CombatPage() {
           to { opacity: 1; transform: scale(1); }
         }
         .animate-fade-in { animation: fade-in 0.3s ease-out; }
+        @keyframes float-up {
+          0%   { opacity: 1; transform: translateY(0) scale(1); }
+          60%  { opacity: 1; transform: translateY(-28px) scale(1.15); }
+          100% { opacity: 0; transform: translateY(-48px) scale(0.9); }
+        }
+        .float-dmg { animation: float-up 0.8s ease-out forwards; }
       `}</style>
 
       <div className="min-h-screen bg-gray-950 text-white flex flex-col max-w-lg mx-auto">
@@ -226,6 +294,27 @@ export function CombatPage() {
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+
+          {/* Bandeau champion boss */}
+          {champion && (
+            <div className="rounded-2xl border border-yellow-600/50 bg-yellow-900/20 p-3 flex items-center gap-3">
+              <span className="text-4xl">{champion.icone}</span>
+              <div>
+                <p className="text-yellow-400 font-black text-sm">COMBAT DE CHAMPION !</p>
+                <p className="text-white font-bold">{champion.nom} — {champion.titre}</p>
+                <p className="text-white/50 text-xs">{champion.description}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Bannière météo */}
+          {phase !== 'preparation' && meteoActuelle !== 'neutre' && (
+            <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 flex items-center gap-2 text-sm">
+              <span className="text-xl">{METEOS[meteoActuelle].icone}</span>
+              <span className="text-white/70 font-bold">{METEOS[meteoActuelle].nom}</span>
+              <span className="text-white/40 text-xs">{METEOS[meteoActuelle].description}</span>
+            </div>
+          )}
 
           {/* Arène */}
           <div className="grid grid-cols-2 gap-3">
@@ -244,6 +333,7 @@ export function CombatPage() {
                         ? HALO_COULEUR[flashCapacite.type] ?? '#ffffff'
                         : undefined
                     }
+                    floatingDmg={floatingDmg}
                   />
                 ))}
               </div>
@@ -263,6 +353,7 @@ export function CombatPage() {
                         ? HALO_COULEUR[flashCapacite.type] ?? '#ffffff'
                         : undefined
                     }
+                    floatingDmg={floatingDmg}
                   />
                 ))}
               </div>

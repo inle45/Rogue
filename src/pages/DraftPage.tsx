@@ -24,7 +24,7 @@ export function DraftPage() {
   const {
     pokedollars, pvJoueur, pvJoueurMax, etage, meilleurEtage,
     terrain, banc, boutique, coutRefresh, carteEtages,
-    boutiqueItems, itemEnAttente,
+    boutiqueItems, itemEnAttente, reliques,
     acheterPokemon, refreshBoutique, lancerCombat, fuir,
     acheterItem, equiperItemSurPokemon,
   } = useJeuStore();
@@ -81,6 +81,15 @@ export function DraftPage() {
 
         {/* Carte des étages sous le header */}
         <CarteEtages carte={carteEtages} etageActuel={etage} />
+
+        {/* Reliques actives */}
+        {reliques.length > 0 && (
+          <div className="flex items-center gap-1 flex-wrap px-4 py-1 border-t border-white/5">
+            {reliques.map(r => (
+              <span key={r.id} title={`${r.nom}: ${r.description}`} className="text-base cursor-help">{r.icone}</span>
+            ))}
+          </div>
+        )}
       </header>
 
       {/* ── Bannière item en attente ── */}

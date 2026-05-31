@@ -5,6 +5,10 @@ import type { TourCombat, ResultatCombat } from '../types/jeu';
 import { getMultiplicateur } from '../data/typeEfficacite';
 import { calculerSynergies } from '../data/synergies';
 import { CAPACITES_PAR_TYPE } from '../data/capacites';
+import { METEOS } from '../data/meteo';
+import type { TypeMeteo } from '../data/meteo';
+import { CHAMPIONS } from '../data/champions';
+import type { DefinitionRelique } from '../data/reliques';
 
 function appliquerBonusSynergies(equipe: PokemonEquipe[]): PokemonEquipe[] {
   const synergies = calculerSynergies(equipe);
@@ -40,6 +44,8 @@ function calculerDegats(
   defenseur: PokemonEquipe,
   ignorerDefense = false,
   multiplicateurCapacite = 1,
+  meteo: TypeMeteo = 'neutre',
+  critique = false,
 ): { degats: number; multiplicateur: number } {
   const bonusAtk = 1 + attaquant.bonusAttaque / 100;
   const defenseEffective = ignorerDefense ? 1 : Math.max(1, defenseur.stats.defense * (1 + defenseur.bonusDefense / 100));
@@ -48,9 +54,18 @@ function calculerDegats(
   // Pierre de Vie : +30% dégâts
   if (attaquant.item?.id === 'life-orb') base = Math.floor(base * 1.3);
 
+  // Critique : double les dégâts
+  if (critique) base = Math.floor(base * 2);
+
   const multiplicateur = getMultiplicateur(attaquant.types[0], defenseur.types);
 
-  let degats = Math.max(1, Math.floor(base * multiplicateur * multiplicateurCapacite));
+  // Météo : boost ou pénalité selon le type de l'attaquant
+  const meteoData = METEOS[meteo];
+  let meteoMult = 1;
+  if (meteoData.typesBoostes.includes(attaquant.types[0])) meteoMult *= 1.3;
+  if (meteoData.typesPenalises.includes(attaquant.types[0])) meteoMult *= 0.7;
+
+  let degats = Math.max(1, Math.floor(base * multiplicateur * multiplicateurCapacite * meteoMult));
 
   // Ceinture Expert : +20% dégâts si super efficace (×2)
   if (attaquant.item?.id === 'expert-belt' && multiplicateur >= 2) {
@@ -60,13 +75,65 @@ function calculerDegats(
   return { degats, multiplicateur };
 }
 
+function appliquerReliquesEquipe(equipe: PokemonEquipe[], reliques: DefinitionRelique[]): PokemonEquipe[] {
+  return equipe.map(pokemon => {
+    let { attaque, defense, pv, vitesse } = pokemon.stats;
+    let bonusAttaque = pokemon.bonusAttaque;
+    let bonusDefense = pokemon.bonusDefense;
+    let bonusPv = pokemon.bonusPv;
+    let pvActuels = pokemon.pvActuels;
+
+    for (const r of reliques) {
+      if (r.effet === 'bonus_atk_global') {
+        attaque = Math.floor(attaque * (1 + r.valeur));
+      } else if (r.effet === 'bonus_def_global') {
+        defense = Math.floor(defense * (1 + r.valeur));
+      } else if (r.effet === 'bonus_pv_global') {
+        const ancienMax = Math.floor(pv * (1 + bonusPv / 100));
+        pv = Math.floor(pv * (1 + r.valeur));
+        const nouveauMax = Math.floor(pv * (1 + bonusPv / 100));
+        // Ajuste pvActuels proportionnellement
+        if (ancienMax > 0) pvActuels = Math.floor(pvActuels * (nouveauMax / ancienMax));
+      } else if (r.effet === 'vitesse_globale') {
+        vitesse = Math.floor(vitesse * (1 + r.valeur));
+      }
+    }
+
+    return {
+      ...pokemon,
+      stats: { attaque, defense, pv, vitesse },
+      bonusAttaque,
+      bonusDefense,
+      bonusPv,
+      pvActuels,
+    };
+  });
+}
+
 export function resoudreCombat(
   equipeJoueur: PokemonEquipe[],
-  equipeEnnemi: PokemonEquipe[]
+  equipeEnnemi: PokemonEquipe[],
+  meteo: TypeMeteo = 'neutre',
+  reliques: DefinitionRelique[] = [],
+  estBoss = false,
 ): ResultatCombat {
-  const joueurs = appliquerBonusSynergies(equipeJoueur.map(p => ({ ...p })));
+  let joueurs = appliquerBonusSynergies(equipeJoueur.map(p => ({ ...p })));
   const ennemis = appliquerBonusSynergies(equipeEnnemi.map(p => ({ ...p })));
+
+  // Applique les reliques à l'équipe joueur
+  if (reliques.length > 0) {
+    joueurs = appliquerReliquesEquipe(joueurs, reliques);
+  }
+
   const tours: TourCombat[] = [];
+  const meteoData = METEOS[meteo];
+
+  // Récupère la chance de coup critique depuis les reliques
+  const reliqueCritique = reliques.find(r => r.effet === 'coup_critique_chance');
+  const chanceCritique = reliqueCritique ? reliqueCritique.valeur : 0;
+
+  // Résistance boss : réduit les dégâts reçus par le joueur de 20%
+  const resistanceBoss = estBoss ? reliques.filter(r => r.effet === 'resistance_boss').reduce((acc, r) => acc * (1 - r.valeur), 1) : 1;
 
   // Compteur d'attaques par Pokémon (instanceId → nombre de coups portés)
   const compteurAttaques: Record<string, number> = {};
@@ -84,8 +151,32 @@ export function resoudreCombat(
     const ennemiVivants = ennemis.filter(p => p.pvActuels > 0);
     if (!joueurVivants.length || !ennemiVivants.length) break;
 
+    // ── Dégâts de météo au début du tour ──
+    if (meteoData.degatsParTour > 0) {
+      for (const pokemon of [...joueurVivants, ...ennemiVivants]) {
+        if (!meteoData.typesImmunsMeteo.includes(pokemon.types[0])) {
+          const dmgMeteo = Math.max(1, Math.floor(pvMax(pokemon) * meteoData.degatsParTour));
+          pokemon.pvActuels = Math.max(0, pokemon.pvActuels - dmgMeteo);
+          tours.push({
+            attaquant: meteoData.nom,
+            defenseur: pokemon.nomFr,
+            instanceIdDefenseur: pokemon.instanceId,
+            degats: dmgMeteo,
+            multiplicateur: 1,
+            pvRestantsDefenseur: pokemon.pvActuels,
+            message: `${meteoData.icone} ${pokemon.nomFr} subit les dégâts de ${meteoData.nom.toLowerCase()} ! (−${dmgMeteo} PV)`,
+            meteo,
+          });
+        }
+      }
+      // Refiltre après dégâts météo
+      const jV2 = joueurs.filter(p => p.pvActuels > 0);
+      const eV2 = ennemis.filter(p => p.pvActuels > 0);
+      if (!jV2.length || !eV2.length) break;
+    }
+
     // ── Début de tour : effets passifs ──
-    for (const pokemon of [...joueurVivants, ...ennemiVivants]) {
+    for (const pokemon of [...joueurs.filter(p => p.pvActuels > 0), ...ennemis.filter(p => p.pvActuels > 0)]) {
       const max = pvMax(pokemon);
 
       // Restes : régénère 6% PV max
@@ -162,6 +253,9 @@ export function resoudreCombat(
       const typeCapacite = pokemon.types[0];
       const capDef = declencheCapacite ? CAPACITES_PAR_TYPE[typeCapacite] : undefined;
 
+      // Coup critique pour relique
+      const estCritique = chanceCritique > 0 && equipe === 'joueur' && Math.random() < chanceCritique;
+
       let msg = '';
       let tourCapacite: TourCombat['capacite'] | undefined;
 
@@ -170,7 +264,10 @@ export function resoudreCombat(
         switch (capDef.effet) {
           case 'frappe_puissante': {
             const ignoreDef = capDef.nom === 'Coup Bas';
-            const { degats, multiplicateur } = calculerDegats(pokemon, cible, ignoreDef, capDef.valeur);
+            const { degats: degatsBase, multiplicateur } = calculerDegats(pokemon, cible, ignoreDef, capDef.valeur, meteo, estCritique);
+            let degats = degatsBase;
+            // Résistance boss si l'ennemi attaque le joueur
+            if (equipe === 'ennemi' && resistanceBoss < 1) degats = Math.max(1, Math.floor(degats * resistanceBoss));
             const pvAvant = cible.pvActuels;
             cible.pvActuels = Math.max(0, cible.pvActuels - degats);
             // Focus Sash : survie à 1PV si KO depuis PV max
@@ -184,6 +281,7 @@ export function resoudreCombat(
               cible.pvActuels = 1;
             }
             msg = `✨ ${pokemon.nomFr} utilise ${capDef.nom} ! ${degats} dégâts sur ${cible.nomFr}`;
+            if (estCritique) msg += ' 💥 CRITIQUE !';
             tourCapacite = { nom: capDef.nom, description: capDef.description };
             tours.push({
               attaquant: pokemon.nomFr, defenseur: cible.nomFr,
@@ -253,7 +351,9 @@ export function resoudreCombat(
             });
             tourCapacite = { nom: capDef.nom, description: capDef.description };
             // Après soin, attaque normalement
-            const { degats, multiplicateur } = calculerDegats(pokemon, cible);
+            const { degats: degAtk, multiplicateur: multAtk } = calculerDegats(pokemon, cible, false, 1, meteo, estCritique);
+            let degats = degAtk;
+            if (equipe === 'ennemi' && resistanceBoss < 1) degats = Math.max(1, Math.floor(degats * resistanceBoss));
             const pvAvantSoin = cible.pvActuels;
             cible.pvActuels = Math.max(0, cible.pvActuels - degats);
             if (
@@ -268,7 +368,7 @@ export function resoudreCombat(
             tours.push({
               attaquant: pokemon.nomFr, defenseur: cible.nomFr,
               instanceIdDefenseur: cible.instanceId,
-              degats, multiplicateur, pvRestantsDefenseur: cible.pvActuels,
+              degats, multiplicateur: multAtk, pvRestantsDefenseur: cible.pvActuels,
               message: msgSoin.trim(), capacite: tourCapacite,
             });
             // Pierre de Vie
@@ -285,7 +385,9 @@ export function resoudreCombat(
           }
           case 'paralysie': {
             paralysieIds.add(cible.instanceId);
-            const { degats, multiplicateur } = calculerDegats(pokemon, cible);
+            const { degats: degParal, multiplicateur: multParal } = calculerDegats(pokemon, cible, false, 1, meteo, estCritique);
+            let degats = degParal;
+            if (equipe === 'ennemi' && resistanceBoss < 1) degats = Math.max(1, Math.floor(degats * resistanceBoss));
             const pvAvantParalysie = cible.pvActuels;
             cible.pvActuels = Math.max(0, cible.pvActuels - degats);
             if (
@@ -301,7 +403,7 @@ export function resoudreCombat(
             tours.push({
               attaquant: pokemon.nomFr, defenseur: cible.nomFr,
               instanceIdDefenseur: cible.instanceId,
-              degats, multiplicateur, pvRestantsDefenseur: cible.pvActuels,
+              degats, multiplicateur: multParal, pvRestantsDefenseur: cible.pvActuels,
               message: `⚡ ${pokemon.nomFr} utilise ${capDef.nom} ! ${cible.nomFr} est paralysé ! (${degats} dégâts)`,
               capacite: tourCapacite,
             });
@@ -319,8 +421,14 @@ export function resoudreCombat(
           }
         }
       } else {
-        // Attaque normale
-        const { degats, multiplicateur } = calculerDegats(pokemon, cible);
+        // Attaque normale — utilise un vrai mouvement si disponible
+        const nomAttaque = pokemon.mouvements && pokemon.mouvements.length > 0
+          ? pokemon.mouvements[Math.floor(Math.random() * pokemon.mouvements.length)]
+          : 'Attaque';
+        const { degats: degNormal, multiplicateur } = calculerDegats(pokemon, cible, false, 1, meteo, estCritique);
+        let degats = degNormal;
+        // Résistance boss si l'ennemi attaque le joueur
+        if (equipe === 'ennemi' && resistanceBoss < 1) degats = Math.max(1, Math.floor(degats * resistanceBoss));
         const pvAvantNormal = cible.pvActuels;
         cible.pvActuels = Math.max(0, cible.pvActuels - degats);
         // Focus Sash : survie à 1PV si KO depuis PV max
@@ -333,8 +441,9 @@ export function resoudreCombat(
           sashUtilise.add(cible.instanceId);
           cible.pvActuels = 1;
         }
-        msg = `${pokemon.nomFr} attaque ${cible.nomFr} pour ${degats} dégâts`;
-        if (multiplicateur === 2) msg += ' — C\'est super efficace !';
+        msg = `${pokemon.nomFr} utilise ${nomAttaque} → ${cible.nomFr} perd ${degats} PV`;
+        if (estCritique) msg += ' 💥 CRITIQUE !';
+        else if (multiplicateur === 2) msg += ' — C\'est super efficace !';
         else if (multiplicateur === 0.5) msg += ' — Ce n\'est pas très efficace…';
         else if (multiplicateur === 0) msg += ' — Ça n\'affecte pas !';
         tours.push({
@@ -373,13 +482,28 @@ export function resoudreCombat(
 }
 
 export function genererEquipeEnnemi(cache: PokemonCache[], etage: number): PokemonEquipe[] {
-  const disponibles = [...cache];
+  const champion = CHAMPIONS[etage];
+  let disponibles = [...cache];
+
+  if (champion) {
+    // Filtre par type spécialité du champion
+    const parType = cache.filter(p => p.types.includes(champion.typeSpecialite));
+    // Prend les 3 plus forts (BST) si assez, sinon fallback
+    const tries = parType.sort((a, b) => b.bst - a.bst);
+    disponibles = tries.length >= 3 ? tries : [...cache].sort((a, b) => b.bst - a.bst);
+  }
+
   const taille = Math.min(3, 1 + Math.floor(etage / 2));
   const equipe: PokemonEquipe[] = [];
+  const indices = new Set<number>();
+
   for (let i = 0; i < taille; i++) {
-    const idx = Math.floor(Math.random() * disponibles.length);
-    const p = disponibles.splice(idx, 1)[0];
-    const facteur = 1 + (etage - 1) * 0.15;
+    if (indices.size >= disponibles.length) break;
+    let idx: number;
+    do { idx = Math.floor(Math.random() * disponibles.length); } while (indices.has(idx));
+    indices.add(idx);
+    const p = disponibles[idx];
+    const facteur = champion ? 1.3 : (1 + (etage - 1) * 0.15);
     equipe.push({
       ...p,
       instanceId: `ennemi_${Math.random().toString(36).slice(2)}`,
@@ -389,7 +513,7 @@ export function genererEquipeEnnemi(cache: PokemonCache[], etage: number): Pokem
         pv: Math.floor(p.stats.pv * facteur),
         attaque: Math.floor(p.stats.attaque * facteur),
         defense: Math.floor(p.stats.defense * facteur),
-        vitesse: p.stats.vitesse,
+        vitesse: champion ? Math.floor(p.stats.vitesse * facteur) : p.stats.vitesse,
       },
     });
   }

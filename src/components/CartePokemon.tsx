@@ -62,12 +62,15 @@ export function CartePokemon({
   const pctPv = pvMax > 0 ? (pvActuels / pvMax) * 100 : 100;
   const couleurPv = pctPv > 60 ? 'bg-green-400' : pctPv > 30 ? 'bg-yellow-400' : 'bg-red-500';
 
+  const isShiny = 'shiny' in pokemon && pokemon.shiny === true;
+
   return (
     <div
       className={`
         relative rounded-2xl border overflow-hidden cursor-pointer
-        bg-gradient-to-b ${gradient} ${bordure}
+        bg-gradient-to-b ${gradient}
         transition-all duration-200 select-none
+        ${isShiny ? 'border-yellow-400 ring-1 ring-yellow-400/50' : bordure}
         ${selectionne ? 'ring-2 ring-cyan-400 ring-offset-1 ring-offset-gray-950' : 'hover:brightness-110'}
         ${compact ? 'w-full' : 'w-full'}
       `}
@@ -77,6 +80,13 @@ export function CartePokemon({
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
+      {/* Badge shiny */}
+      {isShiny && (
+        <div className="absolute top-1.5 right-1.5 z-20 bg-yellow-900/80 border border-yellow-500/60 rounded-lg px-1.5 py-0.5 text-[9px] font-black text-yellow-300 leading-none">
+          ✨ SHINY
+        </div>
+      )}
+
       {/* Sprite avec fond brillant */}
       <div className="relative flex justify-center pt-2 pb-0">
         <div className="absolute inset-0 bg-white/5 rounded-full scale-75 blur-xl" />
@@ -111,10 +121,10 @@ export function CartePokemon({
         {/* Stats */}
         {afficherStats && !compact && !isEquipe && (
           <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-white/60">
-            <span className="flex items-center gap-1"><span className="text-orange-400">⚔</span>{pokemon.stats.attaque}</span>
-            <span className="flex items-center gap-1"><span className="text-blue-400">🛡</span>{pokemon.stats.defense}</span>
-            <span className="flex items-center gap-1"><span className="text-red-400">♥</span>{pokemon.stats.pv}</span>
-            <span className="flex items-center gap-1"><span className="text-yellow-400">⚡</span>{pokemon.stats.vitesse}</span>
+            <span className="flex items-center gap-1"><span className="text-orange-400">⚔</span>{isShiny ? Math.floor(pokemon.stats.attaque * 1.1) : pokemon.stats.attaque}</span>
+            <span className="flex items-center gap-1"><span className="text-blue-400">🛡</span>{isShiny ? Math.floor(pokemon.stats.defense * 1.1) : pokemon.stats.defense}</span>
+            <span className="flex items-center gap-1"><span className="text-red-400">♥</span>{isShiny ? Math.floor(pokemon.stats.pv * 1.1) : pokemon.stats.pv}</span>
+            <span className="flex items-center gap-1"><span className="text-yellow-400">⚡</span>{isShiny ? Math.floor(pokemon.stats.vitesse * 1.1) : pokemon.stats.vitesse}</span>
           </div>
         )}
       </div>

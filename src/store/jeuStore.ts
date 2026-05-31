@@ -6,6 +6,10 @@ import type { PokemonCache, PokemonEquipe, PokemonBoutique } from '../types/poke
 import { calculerSynergies } from '../data/synergies';
 import { genererItemsAleatoires } from '../data/items';
 import type { ItemJeu } from '../data/items';
+import { tirerMeteoAleatoire } from '../data/meteo';
+import type { TypeMeteo } from '../data/meteo';
+import { tirerReliquesAleatoires } from '../data/reliques';
+import type { DefinitionRelique } from '../data/reliques';
 
 // Prix selon rareté : ★1=₽2, ★2=₽3, ★3=₽5, ★4=₽9
 const PRIX_PAR_RARETE: Record<1 | 2 | 3 | 4, number> = { 1: 2, 2: 3, 3: 5, 4: 9 };
@@ -52,8 +56,28 @@ function creerPokemonEquipe(cache: PokemonCache): PokemonEquipe {
   };
 }
 
-function tirerBoutique(cache: PokemonCache[], exclude: string[] = []): PokemonBoutique[] {
-  const disponibles = cache.filter(p => !exclude.includes(p.nom));
+function tirerBoutique(cache: PokemonCache[], exclude: string[] = [], etage?: number): PokemonBoutique[] {
+  // Filtre par rareté selon l'étage
+  let filtres = cache;
+  if (etage !== undefined) {
+    let raretesAutorisees: (1 | 2 | 3 | 4)[];
+    if (etage <= 4) {
+      raretesAutorisees = [1];
+    } else if (etage <= 8) {
+      raretesAutorisees = [1, 2];
+    } else if (etage <= 12) {
+      raretesAutorisees = [1, 2, 3];
+    } else {
+      raretesAutorisees = [1, 2, 3, 4];
+    }
+    const parRarete = cache.filter(p => (raretesAutorisees as number[]).includes(p.rarete) && !exclude.includes(p.nom));
+    // Fallback si moins de 3 disponibles
+    filtres = parRarete.length >= 3 ? parRarete : cache.filter(p => !exclude.includes(p.nom));
+  } else {
+    filtres = cache.filter(p => !exclude.includes(p.nom));
+  }
+
+  const disponibles = filtres;
   const selection: PokemonBoutique[] = [];
   const indices = new Set<number>();
 
@@ -61,7 +85,11 @@ function tirerBoutique(cache: PokemonCache[], exclude: string[] = []): PokemonBo
     const idx = Math.floor(Math.random() * disponibles.length);
     if (!indices.has(idx)) {
       indices.add(idx);
-      const pokemon = disponibles[idx];
+      const base = disponibles[idx];
+      // Shiny : 5% de chance
+      const shiny = Math.random() < 0.05;
+      const pokemon = { ...base, shiny };
+      if (shiny) pokemon.sprite = pokemon.sprite.replace('/pokemon/', '/pokemon/shiny/');
       selection.push({ ...pokemon, prix: PRIX_PAR_RARETE[pokemon.rarete], achete: false });
     }
   }
@@ -82,6 +110,7 @@ interface ActionsJeu {
   fuir: () => void;
   acheterItem: (item: ItemJeu) => void;
   equiperItemSurPokemon: (instanceId: string) => void;
+  choisirRelique: (id: string) => void;
 }
 
 interface StoreJeu extends EtatJeu, ActionsJeu {
@@ -91,6 +120,9 @@ interface StoreJeu extends EtatJeu, ActionsJeu {
   boutiqueItems: ItemJeu[];
   itemEnAttente: ItemJeu | null;
   carteEtages: TypeEtage[];
+  meteoActuelle: TypeMeteo;
+  reliques: DefinitionRelique[];
+  reliquesProposees: DefinitionRelique[];
 }
 
 export const useJeuStore = create<StoreJeu>((set, get) => ({
@@ -110,9 +142,13 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
   boutiqueItems: [],
   itemEnAttente: null,
   carteEtages: genererCarteEtages(),
+  meteoActuelle: 'neutre' as TypeMeteo,
+  reliques: [],
+  reliquesProposees: [],
 
   initialiserCache: (cache) => {
-    const boutique = tirerBoutique(cache);
+    const etage = 1;
+    const boutique = tirerBoutique(cache, [], etage);
     const carteEtages = genererCarteEtages();
     const boutiqueItems = genererItemsAleatoires(NB_ITEMS_BOUTIQUE);
     set({ cachePokemons: cache, boutique, phase: 'draft', carteEtages, boutiqueItems });
@@ -165,9 +201,9 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
   },
 
   refreshBoutique: () => {
-    const { pokedollars, coutRefresh, cachePokemons } = get();
+    const { pokedollars, coutRefresh, cachePokemons, etage } = get();
     if (pokedollars < coutRefresh) return;
-    const boutique = tirerBoutique(cachePokemons);
+    const boutique = tirerBoutique(cachePokemons, [], etage);
     // Le coût augmente de 1 à chaque refresh
     set({ boutique, pokedollars: pokedollars - coutRefresh, coutRefresh: coutRefresh + 1 });
   },
@@ -225,12 +261,12 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
   },
 
   lancerCombat: () => {
-    set({ phase: 'combat' });
+    set({ phase: 'combat', meteoActuelle: tirerMeteoAleatoire() });
   },
 
   appliquerResultatCombat: (degatsJoueur, victoire) => {
-    const { pvJoueur, terrain, banc, etage, pokedollars, cachePokemons } = get();
-    const nouveauxPv = Math.max(0, pvJoueur - degatsJoueur);
+    const { pvJoueur, pvJoueurMax, terrain, banc, etage, pokedollars, cachePokemons, reliques } = get();
+    let nouveauxPv = Math.max(0, pvJoueur - degatsJoueur);
 
     if (nouveauxPv <= 0) {
       set({ pvJoueur: 0, phase: 'defaite' });
@@ -245,16 +281,36 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
     // Victoire : soin de 30% des PV max + passage à l'étage suivant
     const soigner = (p: PokemonEquipe | null): PokemonEquipe | null => {
       if (!p) return null;
-      const pvMax = p.stats.pv + p.bonusPv;
-      return { ...p, pvActuels: Math.min(pvMax, p.pvActuels + Math.floor(pvMax * 0.3)) };
+      const pvMaxP = p.stats.pv + p.bonusPv;
+      return { ...p, pvActuels: Math.min(pvMaxP, p.pvActuels + Math.floor(pvMaxP * 0.3)) };
     };
 
-    const recompense = 5 + etage;
+    // Relique soin_apres_victoire
+    const reliqueSoin = reliques.find(r => r.effet === 'soin_apres_victoire');
+    if (reliqueSoin) {
+      nouveauxPv = Math.min(pvJoueurMax, nouveauxPv + Math.floor(pvJoueurMax * reliqueSoin.valeur));
+    }
+
+    let recompense = 5 + etage;
+
+    // Relique pokedollars_bonus
+    const reliqueDollars = reliques.find(r => r.effet === 'pokedollars_bonus');
+    if (reliqueDollars) {
+      recompense += reliqueDollars.valeur;
+    }
+
     const nouvelEtage = etage + 1;
     sauvegarderMeilleurEtage(nouvelEtage);
     const { carteEtages } = get();
     const typeProchainEtage = carteEtages[nouvelEtage - 1] as TypeEtage | undefined;
     const nbItems = typeProchainEtage === 'boutique_bonus' ? 4 : NB_ITEMS_BOUTIQUE;
+
+    // Boss : propose des reliques (étages 5, 10, 15)
+    const etaitBoss = etage === 5 || etage === 10 || etage === 15;
+    const reliquesProposees = etaitBoss
+      ? tirerReliquesAleatoires(3, reliques.map(r => r.id))
+      : [];
+
     set({
       pvJoueur: nouveauxPv,
       phase: 'draft',
@@ -263,9 +319,10 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
       etage: nouvelEtage,
       meilleurEtage: Math.max(chargerMeilleurEtage(), nouvelEtage),
       pokedollars: pokedollars + recompense,
-      boutique: tirerBoutique(cachePokemons),
+      boutique: tirerBoutique(cachePokemons, [], nouvelEtage),
       boutiqueItems: genererItemsAleatoires(nbItems),
       coutRefresh: COUT_REFRESH_BASE,
+      reliquesProposees,
     });
   },
 
@@ -274,7 +331,7 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
     const nouvelEtage = etage + 1;
     const typeEtage = carteEtages[nouvelEtage - 1] as TypeEtage | undefined;
     const nbItems = typeEtage === 'boutique_bonus' ? 4 : NB_ITEMS_BOUTIQUE;
-    const boutique = tirerBoutique(cachePokemons);
+    const boutique = tirerBoutique(cachePokemons, [], nouvelEtage);
     const boutiqueItems = genererItemsAleatoires(nbItems);
     const recompense = 5 + etage;
     set({
@@ -295,11 +352,12 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
       set({ pvJoueur: 0, phase: 'defaite' });
       return;
     }
-    const boutique = tirerBoutique(cachePokemons);
+    const nouvelEtage = etage + 1;
+    const boutique = tirerBoutique(cachePokemons, [], nouvelEtage);
     const boutiqueItems = genererItemsAleatoires(NB_ITEMS_BOUTIQUE);
     set({
       pvJoueur: nouveauxPv,
-      etage: etage + 1,
+      etage: nouvelEtage,
       pokedollars: pokedollars + 2, // Petite récompense symbolique
       boutique,
       boutiqueItems,
@@ -335,5 +393,15 @@ export const useJeuStore = create<StoreJeu>((set, get) => ({
     const nouveauBanc = equiperSurSlots(banc) as typeof banc;
 
     set({ terrain: nouveauTerrain, banc: nouveauBanc, itemEnAttente: null });
+  },
+
+  choisirRelique: (id: string) => {
+    const { reliques, reliquesProposees } = get();
+    const relique = reliquesProposees.find(r => r.id === id);
+    if (!relique) return;
+    set({
+      reliques: [...reliques, relique],
+      reliquesProposees: [],
+    });
   },
 }));

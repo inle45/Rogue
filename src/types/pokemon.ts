@@ -16,6 +16,8 @@ export interface PokemonCache {
   sprite: string;
   bst: number;
   rarete: 1 | 2 | 3 | 4;
+  shiny?: boolean;
+  mouvements?: string[];
 }
 
 export interface PokemonEquipe extends PokemonCache {

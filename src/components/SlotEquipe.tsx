@@ -56,6 +56,12 @@ export function SlotEquipe({ pokemon, index, type }: Props) {
             compact
             afficherStats={false}
           />
+          {/* Badge shiny dans le slot */}
+          {pokemon.shiny && (
+            <div className="absolute top-1.5 left-1.5 z-10 text-base leading-none" title="Pokémon Shiny">
+              ✨
+            </div>
+          )}
           {/* Bouton vente — visible au survol */}
           <button
             onClick={() => vendrePokemon(pokemon.instanceId)}

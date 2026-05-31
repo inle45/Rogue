@@ -52,6 +52,7 @@ interface PokeApiResponse {
   types: { type: { name: string } }[];
   stats: { base_stat: number; stat: { name: string } }[];
   sprites: { front_default: string; other?: { 'official-artwork'?: { front_default: string } } };
+  moves?: { move: { name: string } }[];
 }
 
 function extraireStats(data: PokeApiResponse): { stats: StatsPokemon; bst: number } {
@@ -91,6 +92,13 @@ async function fetchPokemon(id: number): Promise<PokemonCache> {
   const { stats, bst } = extraireStats(data);
   const rarete = calculerRarete(bst);
 
+  const mouvements = (data.moves ?? []).slice(-4).map((m: { move: { name: string } }) =>
+    m.move.name.replace(/-/g, ' ')
+      .split(' ')
+      .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ')
+  );
+
   return {
     id: data.id,
     nom: data.name,
@@ -100,10 +108,11 @@ async function fetchPokemon(id: number): Promise<PokemonCache> {
     bst,
     rarete,
     sprite: data.sprites.other?.['official-artwork']?.front_default || data.sprites.front_default,
+    mouvements,
   };
 }
 
-const CLE_CACHE_LOCAL = 'pokedraft_cache_v2';
+const CLE_CACHE_LOCAL = 'pokedraft_cache_v3';
 
 export async function chargerCachePokemons(
   onProgression?: (loaded: number, total: number) => void
@@ -114,7 +123,7 @@ export async function chargerCachePokemons(
     if (cached) {
       const data = JSON.parse(cached) as PokemonCache[];
       // Vérifie que le cache est valide et contient les champs rarete/bst
-      if (data.length === 151 && data[0]?.rarete !== undefined) {
+      if (data.length === 151 && data[0]?.rarete !== undefined && data[0]?.mouvements !== undefined) {
         onProgression?.(151, 151);
         return data;
       }

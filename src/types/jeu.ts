@@ -1,5 +1,7 @@
 // Types de l'état global du jeu
 
+import type { TypeMeteo } from '../data/meteo';
+
 // 'victoire' supprimée : après un combat gagné on revient directement en 'draft'
 export type PhaseJeu = 'chargement' | 'draft' | 'combat' | 'defaite';
 
@@ -41,4 +43,5 @@ export interface TourCombat {
   message: string;
   // présent si une capacité spéciale s'est déclenchée ce tour
   capacite?: { nom: string; description: string; cibleAoe?: boolean };
+  meteo?: TypeMeteo;
 }
