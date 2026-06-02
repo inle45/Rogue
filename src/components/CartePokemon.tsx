@@ -1,6 +1,7 @@
 import React from 'react';
-import type { PokemonCache, PokemonEquipe } from '../types/pokemon';
+import type { PokemonCache, PokemonEquipe, PokemonBoutique } from '../types/pokemon';
 import { CarteType } from './CarteType';
+import { getTalent } from '../data/talents';
 
 const GRADIENT_TYPE: Record<string, string> = {
   fire:     'from-orange-900/60 to-red-950/80',
@@ -33,7 +34,7 @@ const BORDURE_TYPE: Record<string, string> = {
 };
 
 interface Props {
-  pokemon: PokemonCache | PokemonEquipe;
+  pokemon: PokemonCache | PokemonEquipe | PokemonBoutique;
   onClick?: () => void;
   selectionne?: boolean;
   afficherStats?: boolean;
@@ -44,8 +45,11 @@ interface Props {
   onDragOver?: (e: React.DragEvent) => void;
 }
 
-function estEquipe(p: PokemonCache | PokemonEquipe): p is PokemonEquipe {
+function estEquipe(p: PokemonCache | PokemonEquipe | PokemonBoutique): p is PokemonEquipe {
   return 'pvActuels' in p;
+}
+function estBoutique(p: PokemonCache | PokemonEquipe | PokemonBoutique): p is PokemonBoutique {
+  return 'pokemonSemaine' in p;
 }
 
 export function CartePokemon({
@@ -53,6 +57,7 @@ export function CartePokemon({
   draggable, onDragStart, onDrop, onDragOver,
 }: Props) {
   const isEquipe = estEquipe(pokemon);
+  const isBoutique = estBoutique(pokemon);
   const typeP = pokemon.types[0] || 'normal';
   const gradient = GRADIENT_TYPE[typeP] || GRADIENT_TYPE.normal;
   const bordure = BORDURE_TYPE[typeP] || BORDURE_TYPE.normal;
@@ -63,6 +68,9 @@ export function CartePokemon({
   const couleurPv = pctPv > 60 ? 'bg-green-400' : pctPv > 30 ? 'bg-yellow-400' : 'bg-red-500';
 
   const isShiny = 'shiny' in pokemon && pokemon.shiny === true;
+  const etoiles = isEquipe ? (pokemon as PokemonEquipe).etoiles : undefined;
+  const pokemonSemaine = isBoutique ? (pokemon as PokemonBoutique).pokemonSemaine : false;
+  const talent = getTalent(pokemon.nomFr);
 
   return (
     <div
@@ -80,6 +88,24 @@ export function CartePokemon({
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
+      {/* Badge Pokémon de la Semaine */}
+      {pokemonSemaine && (
+        <div className="absolute -top-1 inset-x-0 flex justify-center z-30">
+          <span className="bg-gradient-to-r from-pink-600 to-purple-600 text-white text-[8px] font-black px-2 py-0.5 rounded-full">
+            ⭐ POKÉMON DE LA SEMAINE
+          </span>
+        </div>
+      )}
+
+      {/* Badge étoiles (fusion) */}
+      {etoiles && etoiles > 1 && (
+        <div className={`absolute top-1 right-1 z-20 text-xs font-black px-1.5 py-0.5 rounded-lg ${
+          etoiles === 2 ? 'bg-yellow-500 text-black' : 'bg-amber-300 text-black'
+        }`}>
+          {'★'.repeat(etoiles)}
+        </div>
+      )}
+
       {/* Badge shiny */}
       {isShiny && (
         <div className="absolute top-1.5 right-1.5 z-20 bg-yellow-900/80 border border-yellow-500/60 rounded-lg px-1.5 py-0.5 text-[9px] font-black text-yellow-300 leading-none">
@@ -103,6 +129,11 @@ export function CartePokemon({
         <p className={`font-black text-white text-center truncate ${compact ? 'text-xs' : 'text-sm'}`}>
           {pokemon.nomFr}
         </p>
+        {talent && (
+          <p className="text-[8px] text-cyan-400/70 text-center leading-tight font-bold truncate px-1">
+            ⚡ {talent.nom}
+          </p>
+        )}
         {!compact && pokemon.nature && pokemon.nature.statBonus && (
           <p className="text-[9px] text-center">
             <span className="text-green-400">↑{pokemon.nature.statBonus}</span>

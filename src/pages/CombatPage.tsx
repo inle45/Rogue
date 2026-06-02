@@ -5,7 +5,7 @@ import type { TourCombat } from '../types/jeu';
 import type { PokemonEquipe } from '../types/pokemon';
 import { Audio } from '../services/audioService';
 import { METEOS } from '../data/meteo';
-import { CHAMPIONS } from '../data/champions';
+import { CHAMPIONS, BOSS_FINAUX } from '../data/champions';
 
 // Couleur de flash par type pour les animations de capacité
 const FLASH_TYPE: Record<string, string> = {
@@ -173,11 +173,12 @@ export function CombatPage() {
   }, [vitesse]);
 
   const equipeJoueur = terrain.filter(Boolean) as PokemonEquipe[];
-  const champion = CHAMPIONS[etage];
+  const bossAlternatif = etage === 15 && classeDresseur ? BOSS_FINAUX[classeDresseur] : null;
+  const champion = bossAlternatif ?? CHAMPIONS[etage];
   const estBoss = !!champion;
 
   useEffect(() => {
-    if (cachePokemons.length > 0) setEquipeEnnemi(genererEquipeEnnemi(cachePokemons, etage, combatDifficile));
+    if (cachePokemons.length > 0) setEquipeEnnemi(genererEquipeEnnemi(cachePokemons, etage, combatDifficile, classeDresseur));
   }, [cachePokemons, etage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {

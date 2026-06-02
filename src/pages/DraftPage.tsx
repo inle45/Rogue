@@ -29,6 +29,7 @@ export function DraftPage() {
     acheterPokemon, refreshBoutique, lancerCombat, fuir,
     acheterItem, equiperItemSurPokemon,
     utiliserCentreRepas, choisirEvenement, combatDifficile,
+    evenementActuel, choisirOptionEvenement,
   } = useJeuStore();
 
   const nbTerrain = terrain.filter(Boolean).length;
@@ -122,6 +123,29 @@ export function DraftPage() {
           >
             ✕ Annuler
           </button>
+        </div>
+      )}
+
+      {/* ── Feature 7 : Modal événement narratif ── */}
+      {evenementActuel && (
+        <div className="fixed inset-0 z-50 bg-gray-950/90 flex items-center justify-center p-4">
+          <div className="bg-gray-900 rounded-2xl border border-white/10 p-6 max-w-sm w-full flex flex-col gap-4">
+            <div className="text-center">
+              <p className="text-5xl mb-2">{evenementActuel.icone}</p>
+              <h2 className="text-xl font-black text-white">{evenementActuel.titre}</h2>
+              <p className="text-white/60 text-sm mt-2 leading-relaxed">{evenementActuel.texte}</p>
+            </div>
+            <div className="flex flex-col gap-2">
+              {evenementActuel.choix.map((c, i) => (
+                <button key={i}
+                  onClick={() => { choisirOptionEvenement(i as 0 | 1); Audio.achat(); }}
+                  className="w-full py-3 rounded-xl text-sm font-bold border border-white/10 bg-white/5 hover:bg-white/10 transition-all text-white"
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 

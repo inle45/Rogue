@@ -30,11 +30,13 @@ export interface PokemonEquipe extends PokemonCache {
   item?: import('../data/items').ItemJeu;
   itemConsomme?: boolean;
   statut?: 'poison' | 'brulure' | 'paralysie' | 'sommeil' | 'gel';
+  etoiles?: 1 | 2 | 3;
 }
 
 export interface PokemonBoutique extends PokemonCache {
   prix: number;
   achete: boolean;
+  pokemonSemaine?: boolean;
 }
 
 export type TypePokemon =

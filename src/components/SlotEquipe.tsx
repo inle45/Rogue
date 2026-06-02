@@ -62,7 +62,7 @@ export function SlotEquipe({ pokemon, index, type }: Props) {
         ${survol
           ? 'border-2 border-cyan-400 bg-cyan-900/20 scale-[1.02]'
           : pokemon
-            ? `border ${role ? role.couleurBorder : 'border-white/10'}`
+            ? `border ${role ? role.couleurBorder : 'border-white/10'} ${pokemon.etoiles === 3 ? 'ring-2 ring-amber-300/80' : pokemon.etoiles === 2 ? 'ring-1 ring-yellow-500/60' : ''}`
             : 'border border-dashed border-white/15'}
       `}
       onDragOver={onDragOver}

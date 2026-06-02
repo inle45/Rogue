@@ -1,4 +1,6 @@
 import { useJeuStore } from '../store/jeuStore';
+import { chargerScores } from '../data/scores';
+import { getNbVus } from '../data/pokedex';
 
 interface Props {
   etage: number;
@@ -9,7 +11,10 @@ export function GameOverPage({ etage, onRecommencer }: Props) {
   const meilleurEtage = useJeuStore(s => s.meilleurEtage);
   const statsRun = useJeuStore(s => s.statsRun);
   const reliques = useJeuStore(s => s.reliques);
+  const nouveauxAchievements = useJeuStore(s => s.nouveauxAchievements);
   const nouveauRecord = etage >= meilleurEtage && etage > 1;
+  const scores = chargerScores();
+  const nbVus = getNbVus();
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center gap-6 px-8 max-w-lg mx-auto">
@@ -61,6 +66,38 @@ export function GameOverPage({ etage, onRecommencer }: Props) {
           </div>
         )}
       </div>
+
+      {/* Score actuel + Top 5 */}
+      {scores.length > 0 && (
+        <div className="w-full rounded-2xl border border-white/10 bg-white/3 p-4 flex flex-col gap-2">
+          <p className="text-white/40 text-xs font-bold tracking-widest">CLASSEMENT</p>
+          {scores.map((s, i) => (
+            <div key={i} className={`flex items-center justify-between text-sm ${i === 0 ? 'text-yellow-400 font-black' : 'text-white/60'}`}>
+              <span>#{i + 1} {s.classe} — Étage {s.etage}</span>
+              <span className="font-bold">{s.score.toLocaleString()} pts</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Pokédex */}
+      <p className="text-white/50 text-sm">📖 Pokédex : {nbVus} / 386 Pokémon découverts</p>
+
+      {/* Nouveaux achievements */}
+      {nouveauxAchievements.length > 0 && (
+        <div className="w-full flex flex-col gap-2">
+          <p className="text-white/40 text-xs font-bold tracking-widest">SUCCÈS DÉBLOQUÉS</p>
+          {nouveauxAchievements.map(a => (
+            <div key={a.id} className="flex items-center gap-2 bg-yellow-900/30 border border-yellow-700/40 rounded-xl p-2">
+              <span className="text-2xl">{a.icone}</span>
+              <div>
+                <p className="text-yellow-300 font-black text-sm">{a.nom}</p>
+                <p className="text-white/50 text-xs">{a.description}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <button
         onClick={onRecommencer}

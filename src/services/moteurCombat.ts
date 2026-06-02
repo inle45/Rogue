@@ -4,11 +4,12 @@ import type { PokemonEquipe, PokemonCache } from '../types/pokemon';
 import type { TourCombat, ResultatCombat } from '../types/jeu';
 import { getMultiplicateur } from '../data/typeEfficacite';
 import { calculerSynergies } from '../data/synergies';
-import { CAPACITES_PAR_TYPE } from '../data/capacites';
+import { CAPACITES_PAR_TYPE, ULTIMATES_PAR_TYPE } from '../data/capacites';
 import { METEOS } from '../data/meteo';
 import type { TypeMeteo } from '../data/meteo';
-import { CHAMPIONS } from '../data/champions';
+import { CHAMPIONS, BOSS_FINAUX } from '../data/champions';
 import type { DefinitionRelique } from '../data/reliques';
+import { getTalent } from '../data/talents';
 
 function appliquerBonusSynergies(equipe: PokemonEquipe[]): PokemonEquipe[] {
   const synergies = calculerSynergies(equipe);
@@ -29,11 +30,13 @@ function appliquerBonusSynergies(equipe: PokemonEquipe[]): PokemonEquipe[] {
 }
 
 /** Calcule la vitesse effective d'un Pokémon (Serre Griffe ×1,5) */
-function vitesseEffective(pokemon: PokemonEquipe): number {
+function vitesseEffective(pokemon: PokemonEquipe, meteo: TypeMeteo = 'neutre'): number {
   // Paralysie : vitesse ÷2
   const multParalysie = pokemon.statut === 'paralysie' ? 0.5 : 1;
   const mult = pokemon.item?.id === 'quick-claw' ? 1.5 : 1;
-  return pokemon.stats.vitesse * mult * multParalysie;
+  // Chlorophylle (Méganium, Venusaur) : VIT ×2 sous le soleil
+  const multChlorophylle = (meteo === 'soleil' && getTalent(pokemon.nomFr)?.nom === 'Chlorophylle') ? 2 : 1;
+  return pokemon.stats.vitesse * mult * multParalysie * multChlorophylle;
 }
 
 /** PV max tenant compte des bonus de synergies */
@@ -156,6 +159,10 @@ function tentativeStatut(
   statut: PokemonEquipe['statut'],
 ): boolean {
   if (cible.statut) return false; // déjà un statut
+  // Metagross : immunisé au poison
+  if (statut === 'poison' && getTalent(cible.nomFr)?.nom === 'Bras de Fer') return false;
+  // Ronflex : immunisé au sommeil et paralysie
+  if ((statut === 'sommeil' || statut === 'paralysie') && getTalent(cible.nomFr)?.nom === 'Gros Estomac') return false;
   if (Math.random() < 0.15) {
     cible.statut = statut;
     return true;
@@ -196,6 +203,20 @@ export function resoudreCombat(
       pvActuels: Math.floor(p.pvActuels * 1.3),
     }));
   }
+
+  // ── Talents passifs au début du combat ──
+  // Intimidation : -10% ATK ennemis pour chaque Pokémon intimidateur
+  const intimidateurs = joueurs.filter(p => getTalent(p.nomFr)?.nom === 'Intimidation');
+  if (intimidateurs.length > 0) {
+    for (const e of ennemis) {
+      e.stats = { ...e.stats, attaque: Math.floor(e.stats.attaque * (1 - 0.1 * intimidateurs.length)) };
+    }
+  }
+  // Rayquaza : +20% ATK et DEF si dans l'équipe
+  joueurs = joueurs.map(p => getTalent(p.nomFr)?.nom === 'Régulation Aérienne' ? {
+    ...p,
+    stats: { ...p.stats, attaque: Math.floor(p.stats.attaque * 1.2), defense: Math.floor(p.stats.defense * 1.2) },
+  } : p);
 
   const tours: TourCombat[] = [];
   const meteoData = METEOS[meteo];
@@ -309,7 +330,7 @@ export function resoudreCombat(
     const combattants = [
       ...joueurs.filter(p => p.pvActuels > 0).map(p => ({ pokemon: p, equipe: 'joueur' as const })),
       ...ennemis.filter(p => p.pvActuels > 0).map(p => ({ pokemon: p, equipe: 'ennemi' as const })),
-    ].sort((a, b) => vitesseEffective(b.pokemon) - vitesseEffective(a.pokemon));
+    ].sort((a, b) => vitesseEffective(b.pokemon, meteo) - vitesseEffective(a.pokemon, meteo));
 
     for (const { pokemon, equipe } of combattants) {
       if (pokemon.pvActuels <= 0) continue;
@@ -358,33 +379,41 @@ export function resoudreCombat(
 
       // Statut sommeil : saute le tour, 33% de se réveiller
       if (pokemon.statut === 'sommeil') {
-        toursSommeil[pokemon.instanceId] = (toursSommeil[pokemon.instanceId] ?? 0) + 1;
-        if (Math.random() < 0.33) {
+        // Gros Estomac (Ronflex) / Bon Sens (Alakazam) : immunisé au sommeil
+        if (getTalent(pokemon.nomFr)?.nom === 'Gros Estomac' || getTalent(pokemon.nomFr)?.nom === 'Bon Sens') {
           pokemon.statut = undefined;
-          tours.push({
-            attaquant: pokemon.nomFr,
-            defenseur: pokemon.nomFr,
-            instanceIdDefenseur: pokemon.instanceId,
-            degats: 0,
-            multiplicateur: 1,
-            pvRestantsDefenseur: pokemon.pvActuels,
-            message: `😴 ${pokemon.nomFr} se réveille !`,
-          });
         } else {
-          tours.push({
-            attaquant: pokemon.nomFr,
-            defenseur: pokemon.nomFr,
-            instanceIdDefenseur: pokemon.instanceId,
-            degats: 0,
-            multiplicateur: 1,
-            pvRestantsDefenseur: pokemon.pvActuels,
-            message: `💤 ${pokemon.nomFr} est endormi et ne peut pas attaquer !`,
-          });
-          continue;
+          toursSommeil[pokemon.instanceId] = (toursSommeil[pokemon.instanceId] ?? 0) + 1;
+          if (Math.random() < 0.33) {
+            pokemon.statut = undefined;
+            tours.push({
+              attaquant: pokemon.nomFr,
+              defenseur: pokemon.nomFr,
+              instanceIdDefenseur: pokemon.instanceId,
+              degats: 0,
+              multiplicateur: 1,
+              pvRestantsDefenseur: pokemon.pvActuels,
+              message: `😴 ${pokemon.nomFr} se réveille !`,
+            });
+          } else {
+            tours.push({
+              attaquant: pokemon.nomFr,
+              defenseur: pokemon.nomFr,
+              instanceIdDefenseur: pokemon.instanceId,
+              degats: 0,
+              multiplicateur: 1,
+              pvRestantsDefenseur: pokemon.pvActuels,
+              message: `💤 ${pokemon.nomFr} est endormi et ne peut pas attaquer !`,
+            });
+            continue;
+          }
         }
       }
 
-      // Statut paralysie : 33% de rater l'attaque
+      // Statut paralysie : 33% de rater l'attaque (Ronflex immunisé)
+      if (pokemon.statut === 'paralysie' && getTalent(pokemon.nomFr)?.nom === 'Gros Estomac') {
+        pokemon.statut = undefined;
+      }
       if (pokemon.statut === 'paralysie' && Math.random() < 0.33) {
         tours.push({
           attaquant: pokemon.nomFr,
@@ -410,23 +439,137 @@ export function resoudreCombat(
 
       // Incrémente le compteur d'attaques
       compteurAttaques[pokemon.instanceId] = (compteurAttaques[pokemon.instanceId] ?? 0) + 1;
-      const declencheCapacite = compteurAttaques[pokemon.instanceId] % 3 === 0;
+      const nbAttaquesPokemon = compteurAttaques[pokemon.instanceId];
+      const declencheUltimate = nbAttaquesPokemon % 6 === 0 && nbAttaquesPokemon > 0;
+      const declencheCapacite = !declencheUltimate && nbAttaquesPokemon % 3 === 0;
 
       const typeCapacite = pokemon.types[0];
       const capDef = declencheCapacite ? CAPACITES_PAR_TYPE[typeCapacite] : undefined;
+      const ultimateDef = declencheUltimate ? ULTIMATES_PAR_TYPE[typeCapacite] : undefined;
 
       // Coup critique pour relique
       const estCritique = chanceCritique > 0 && equipe === 'joueur' && Math.random() < chanceCritique;
 
+      // ── Talent Brasier / Frénésie / Implacable ──
+      const talentPokemon = getTalent(pokemon.nomFr);
+      let multTalent = 1;
+      let ignorerDefenseTalent = false;
+      if (talentPokemon?.nom === 'Brasier' && pokemon.pvActuels < pvMax(pokemon) * 0.33) {
+        multTalent = 1.5;
+      }
+      if (talentPokemon?.nom === 'Frénésie') {
+        const nbAttaques = nbAttaquesPokemon - 1;
+        multTalent = Math.min(1.5, 1 + nbAttaques * 0.1);
+      }
+      if (talentPokemon?.nom === 'Implacable') {
+        ignorerDefenseTalent = true;
+      }
+
       let msg = '';
       let tourCapacite: TourCombat['capacite'] | undefined;
 
-      if (capDef && declencheCapacite) {
+      // ── ULTIMATE ──
+      if (ultimateDef && declencheUltimate) {
+        tourCapacite = { nom: `⚡⚡ ULTIME ! ${ultimateDef.nom}`, description: ultimateDef.description };
+        switch (ultimateDef.effet) {
+          case 'nuke': {
+            const degatsParCible = Math.max(1, Math.floor(pokemon.stats.attaque * (1 + pokemon.bonusAttaque / 100) * ultimateDef.valeur * multTalent));
+            let msgUlt = `⚡⚡ ULTIME ! ${pokemon.nomFr} utilise ${ultimateDef.nom} ! `;
+            cibles.forEach(c => {
+              const pvAvantUlt = c.pvActuels;
+              let d = degatsParCible;
+              if (equipe === 'ennemi' && resistanceBoss < 1) d = Math.max(1, Math.floor(d * resistanceBoss));
+              c.pvActuels = Math.max(0, c.pvActuels - d);
+              if (c.pvActuels <= 0 && pvAvantUlt >= pvMax(c) && c.item?.id === 'focus-sash' && !sashUtilise.has(c.instanceId)) {
+                sashUtilise.add(c.instanceId);
+                c.pvActuels = 1;
+              }
+              msgUlt += `${c.nomFr} (−${d}) `;
+              // Hariyama : soigne 10% PV max après KO
+              if (c.pvActuels <= 0 && equipe === 'joueur') {
+                const hariyama = joueurs.find(p2 => p2.pvActuels > 0 && getTalent(p2.nomFr)?.nom === 'Morale');
+                if (hariyama) {
+                  const soinH = Math.max(1, Math.floor(pvMax(hariyama) * 0.1));
+                  hariyama.pvActuels = Math.min(pvMax(hariyama), hariyama.pvActuels + soinH);
+                }
+              }
+            });
+            // Effet ghost ultime : reset_statuts → sommeil
+            if (typeCapacite === 'ghost' || typeCapacite === 'electric') {
+              cibles.forEach(c => { if (c.pvActuels > 0) c.statut = typeCapacite === 'ghost' ? 'sommeil' : 'paralysie'; });
+            }
+            tours.push({
+              attaquant: pokemon.nomFr, defenseur: 'toute l\'équipe ennemie',
+              instanceIdDefenseur: cible.instanceId,
+              degats: degatsParCible, multiplicateur: 1,
+              pvRestantsDefenseur: cible.pvActuels,
+              message: msgUlt.trim(), capacite: tourCapacite,
+            });
+            break;
+          }
+          case 'soin_max': {
+            let msgUlt = `⚡⚡ ULTIME ! ${pokemon.nomFr} utilise ${ultimateDef.nom} ! `;
+            allies.filter(a => a.pvActuels > 0).forEach(a => {
+              const max = pvMax(a);
+              const soin = Math.floor(max * ultimateDef.valeur);
+              a.pvActuels = Math.min(max, a.pvActuels + soin);
+              msgUlt += `${a.nomFr} (+${soin}) `;
+            });
+            tours.push({
+              attaquant: pokemon.nomFr, defenseur: 'toute l\'équipe alliée',
+              instanceIdDefenseur: pokemon.instanceId,
+              degats: 0, multiplicateur: 1,
+              pvRestantsDefenseur: pokemon.pvActuels,
+              message: msgUlt.trim(), capacite: tourCapacite,
+            });
+            break;
+          }
+          case 'buff_equipe': {
+            // Dark : réduit ATK ennemie de valeur * 100 %
+            let msgUlt = `⚡⚡ ULTIME ! ${pokemon.nomFr} utilise ${ultimateDef.nom} ! `;
+            if (typeCapacite === 'dark') {
+              cibles.forEach(c => { c.stats = { ...c.stats, attaque: Math.floor(c.stats.attaque * (1 - ultimateDef.valeur)) }; });
+              msgUlt += 'ATK ennemie réduite ! ';
+            } else if (typeCapacite === 'steel') {
+              allies.filter(a => a.pvActuels > 0).forEach(a => {
+                a.bonusDefense = (a.bonusDefense ?? 0) + Math.floor(ultimateDef.valeur * 100);
+              });
+              msgUlt += 'DEF équipe augmentée ! ';
+            }
+            // Attack anyway
+            const { degats: degAux } = calculerDegats(pokemon, cible, ignorerDefenseTalent, 1, meteo, estCritique);
+            let dAux = Math.floor(degAux * multTalent);
+            if (equipe === 'ennemi' && resistanceBoss < 1) dAux = Math.max(1, Math.floor(dAux * resistanceBoss));
+            cible.pvActuels = Math.max(0, cible.pvActuels - dAux);
+            tours.push({
+              attaquant: pokemon.nomFr, defenseur: cible.nomFr,
+              instanceIdDefenseur: cible.instanceId,
+              degats: dAux, multiplicateur: 1,
+              pvRestantsDefenseur: cible.pvActuels,
+              message: msgUlt.trim(), capacite: tourCapacite,
+            });
+            break;
+          }
+          case 'reset_statuts': {
+            // Ghost : endort toute l'équipe ennemie
+            let msgUlt = `⚡⚡ ULTIME ! ${pokemon.nomFr} utilise ${ultimateDef.nom} ! `;
+            cibles.forEach(c => { if (c.pvActuels > 0) { c.statut = 'sommeil'; msgUlt += `${c.nomFr} s'endort ! `; } });
+            tours.push({
+              attaquant: pokemon.nomFr, defenseur: 'toute l\'équipe ennemie',
+              instanceIdDefenseur: cible.instanceId,
+              degats: 0, multiplicateur: 1,
+              pvRestantsDefenseur: cible.pvActuels,
+              message: msgUlt.trim(), capacite: tourCapacite,
+            });
+            break;
+          }
+        }
+      } else if (capDef && declencheCapacite) {
         // ── Traitement de la capacité ──
         switch (capDef.effet) {
           case 'frappe_puissante': {
-            const ignoreDef = capDef.nom === 'Coup Bas';
-            const { degats: degatsBase, multiplicateur } = calculerDegats(pokemon, cible, ignoreDef, capDef.valeur, meteo, estCritique);
+            const ignoreDef = capDef.nom === 'Coup Bas' || ignorerDefenseTalent;
+            const { degats: degatsBase, multiplicateur } = calculerDegats(pokemon, cible, ignoreDef, capDef.valeur * multTalent, meteo, estCritique);
             let degats = degatsBase;
             // Résistance boss si l'ennemi attaque le joueur
             if (equipe === 'ennemi' && resistanceBoss < 1) degats = Math.max(1, Math.floor(degats * resistanceBoss));
@@ -607,7 +750,7 @@ export function resoudreCombat(
         const nomAttaque = pokemon.mouvements && pokemon.mouvements.length > 0
           ? pokemon.mouvements[Math.floor(Math.random() * pokemon.mouvements.length)]
           : pokemon.nomFr;
-        const { degats: degNormal, multiplicateur } = calculerDegats(pokemon, cible, false, 1, meteo, estCritique);
+        const { degats: degNormal, multiplicateur } = calculerDegats(pokemon, cible, ignorerDefenseTalent, multTalent, meteo, estCritique);
         let degats = degNormal;
         // Résistance boss si l'ennemi attaque le joueur
         if (equipe === 'ennemi' && resistanceBoss < 1) degats = Math.max(1, Math.floor(degats * resistanceBoss));
@@ -622,6 +765,15 @@ export function resoudreCombat(
         ) {
           sashUtilise.add(cible.instanceId);
           cible.pvActuels = 1;
+        }
+
+        // Hariyama : soigne 10% PV max après KO ennemi
+        if (cible.pvActuels <= 0 && equipe === 'joueur') {
+          const hariyama = joueurs.find(p2 => p2.pvActuels > 0 && getTalent(p2.nomFr)?.nom === 'Morale');
+          if (hariyama) {
+            const soinH = Math.max(1, Math.floor(pvMax(hariyama) * 0.1));
+            hariyama.pvActuels = Math.min(pvMax(hariyama), hariyama.pvActuels + soinH);
+          }
         }
 
         // Application de statuts sur attaque normale (chance réduite)
@@ -651,6 +803,20 @@ export function resoudreCombat(
           degats, multiplicateur, pvRestantsDefenseur: cible.pvActuels,
           message: msg, statutApplique,
         });
+
+        // Kangourex : Parental Bond — seconde attaque à ×0.6
+        if (getTalent(pokemon.nomFr)?.nom === 'Parental Bond' && cible.pvActuels > 0) {
+          const { degats: deg2 } = calculerDegats(pokemon, cible, ignorerDefenseTalent, 0.6, meteo, false);
+          let d2 = deg2;
+          if (equipe === 'ennemi' && resistanceBoss < 1) d2 = Math.max(1, Math.floor(d2 * resistanceBoss));
+          cible.pvActuels = Math.max(0, cible.pvActuels - d2);
+          tours.push({
+            attaquant: pokemon.nomFr, defenseur: cible.nomFr,
+            instanceIdDefenseur: cible.instanceId,
+            degats: d2, multiplicateur, pvRestantsDefenseur: cible.pvActuels,
+            message: `${pokemon.nomFr} frappe une seconde fois ! (Parental Bond) → ${cible.nomFr} perd ${d2} PV`,
+          });
+        }
         // Pierre de Vie : retire 8% pvMax après attaque
         if (pokemon.item?.id === 'life-orb') {
           const cout = Math.max(1, Math.floor(pvMax(pokemon) * 0.08));
@@ -684,8 +850,11 @@ export function genererEquipeEnnemi(
   cache: PokemonCache[],
   etage: number,
   combatDifficile = false,
+  classeDresseur: string | null = null,
 ): PokemonEquipe[] {
-  const champion = CHAMPIONS[etage];
+  // Boss alternatif selon la classe pour l'étage 15
+  const bossAlternatif = etage === 15 && classeDresseur ? BOSS_FINAUX[classeDresseur] : null;
+  const champion = bossAlternatif ?? CHAMPIONS[etage];
   let disponibles: PokemonCache[];
 
   if (champion) {
